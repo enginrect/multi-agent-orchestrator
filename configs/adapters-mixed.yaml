@@ -1,0 +1,38 @@
+# Mixed configuration — Cursor manual, Claude + Codex automatic.
+#
+# - Cursor: manual fallback (human implements, then resumes)
+# - Claude: real via claude CLI
+# - Codex: real via codex CLI
+#
+# Use this when you want reviews automated but prefer to implement
+# changes yourself (or when cursor CLI is not available).
+#
+# Usage: orchestrator run my-task --target-repo /path -c configs/adapters-mixed.yaml
+# Then:  orchestrator resume my-task -c configs/adapters-mixed.yaml
+
+workspace_dir: ./workspace
+template_dir: ./templates/artifacts
+max_cycles: 2
+
+adapters:
+  cursor:
+    type: cursor-cli
+    settings:
+      manual_fallback: true
+      # To enable real Cursor automation instead, remove manual_fallback
+      # and set command to the cursor binary path:
+      #   command: /usr/local/bin/cursor
+      #   manual_fallback: false
+
+  claude:
+    type: claude-cli
+    settings:
+      # Use absolute path to avoid shell function/alias issues in subprocess
+      command: /Users/enginrect/.local/bin/claude
+      timeout: 300
+
+  codex:
+    type: codex-cli
+    settings:
+      command: /opt/homebrew/bin/codex
+      timeout: 600

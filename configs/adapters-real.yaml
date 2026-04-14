@@ -1,0 +1,39 @@
+# Full real command-based configuration.
+#
+# All three agents are invoked via their native CLIs:
+# - Cursor: cursor agent -p --trust --yolo (headless mode)
+# - Claude: claude -p --permission-mode auto (print mode)
+# - Codex: codex exec --full-auto (non-interactive mode)
+#
+# Requirements:
+# - /usr/local/bin/cursor (Cursor 2.6+)
+# - /Users/enginrect/.local/bin/claude (authenticated)
+# - /opt/homebrew/bin/codex (OPENAI_API_KEY set)
+#
+# Usage: morch run task my-task --target-repo /path -c configs/adapters-real.yaml
+
+workspace_dir: ./workspace
+template_dir: ./templates/artifacts
+max_cycles: 2
+
+agents:
+  enabled: [cursor, claude, codex]
+
+adapters:
+  cursor:
+    type: cursor-cli
+    settings:
+      command: /usr/local/bin/cursor
+      timeout: 600
+
+  claude:
+    type: claude-cli
+    settings:
+      command: /Users/enginrect/.local/bin/claude
+      timeout: 300
+
+  codex:
+    type: codex-cli
+    settings:
+      command: /opt/homebrew/bin/codex
+      timeout: 600
