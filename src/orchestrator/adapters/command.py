@@ -374,12 +374,22 @@ class CommandAdapter(AgentAdapter):
 
         artifact_path = self._store.artifact_path(task_name, artifact)
         if not artifact_path.is_file():
-            logger.log("adapter_artifact_missing", artifact=artifact)
-            return ExecutionResult(
-                status=ExecutionStatus.FAILED,
-                artifact_written=False,
-                message=f"Command succeeded but artifact not written: {artifact}",
-            )
+            if context.get("workflow_mode") == "github":
+                summary = (proc.stdout or "").strip()
+                if summary:
+                    artifact_path.write_text(summary)
+                logger.log(
+                    "adapter_github_no_local_artifact",
+                    artifact=artifact,
+                    note="GitHub mode: command succeeded, PR expected on remote",
+                )
+            else:
+                logger.log("adapter_artifact_missing", artifact=artifact)
+                return ExecutionResult(
+                    status=ExecutionStatus.FAILED,
+                    artifact_written=False,
+                    message=f"Command succeeded but artifact not written: {artifact}",
+                )
 
         outcome = self._detect_outcome(task_name, artifact)
 
@@ -392,7 +402,7 @@ class CommandAdapter(AgentAdapter):
 
         return ExecutionResult(
             status=ExecutionStatus.COMPLETED,
-            artifact_written=True,
+            artifact_written=artifact_path.is_file(),
             message=f"Command completed: {artifact}",
             review_outcome=outcome,
         )
