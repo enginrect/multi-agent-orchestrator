@@ -12,6 +12,7 @@ agents:
 
 github:
   repo: ""                                    # Set via --repo or here: "owner/repo-name"
+  local_repo_path: ""                         # Optional: agent workspace path; override per run with --local-repo
   base_branch: "main"
   branch_pattern: "{type}/issue-{issue}/{agent}/cycle-{cycle}"
   pr_title_pattern: "[{type}][Issue #{issue}][{agent}] {summary}"

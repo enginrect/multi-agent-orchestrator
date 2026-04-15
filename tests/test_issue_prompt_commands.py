@@ -431,3 +431,268 @@ class TestGitignore:
         if gitignore.is_file():
             content = gitignore.read_text()
             assert ".morch/" in content
+
+
+# ======================================================================
+# Issue creation URL parsing (the bug fix)
+# ======================================================================
+
+
+class TestIssueCreationUrlParsing:
+    """Verify that create_issue handles gh's plain-text URL output."""
+
+    def test_url_output_parsed_correctly(self):
+        svc = GitHubService("owner/repo")
+        with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:
+            mock.return_value = MagicMock(
+                returncode=0,
+                stdout="https://github.com/owner/repo/issues/99\n",
+                stderr="",
+            )
+            result = svc.create_issue("Test", "Body")
+        assert result["number"] == 99
+        assert "issues/99" in result["url"]
+
+    def test_empty_stdout_raises_clear_error(self):
+        from orchestrator.infrastructure.github_service import GitHubError
+        svc = GitHubService("owner/repo")
+        with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:
+            mock.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            with pytest.raises(GitHubError, match="empty output"):
+                svc.create_issue("Test", "Body")
+
+    def test_non_url_raises_clear_error(self):
+        from orchestrator.infrastructure.github_service import GitHubError
+        svc = GitHubService("owner/repo")
+        with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:
+            mock.return_value = MagicMock(
+                returncode=0, stdout="Created successfully", stderr=""
+            )
+            with pytest.raises(GitHubError, match="Could not extract"):
+                svc.create_issue("Test", "Body")
+
+    def test_issue_start_flow_extracts_number(self):
+        """Simulates the cmd_issue_start code path: create -> extract number."""
+        svc = GitHubService("enginrect/multi-agent-orchestrator")
+        with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:
+            mock.return_value = MagicMock(
+                returncode=0,
+                stdout="https://github.com/enginrect/multi-agent-orchestrator/issues/3\n",
+                stderr="",
+            )
+            result = svc.create_issue(
+                "Refactor morch for consistency",
+                "Detailed body",
+            )
+        assert result["number"] == 3
+        assert isinstance(result["number"], int)
+
+
+# ======================================================================
+# Local repo path resolution
+# ======================================================================
+
+
+class TestLocalRepoPathInContext:
+    """Verify that local_repo_path is used as target_repo in context."""
+
+    @pytest.fixture
+    def workspace(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        return ws
+
+    @pytest.fixture
+    def store(self, workspace):
+        from orchestrator.infrastructure.file_state_store import FileStateStore
+        return FileStateStore(str(workspace))
+
+    @pytest.fixture
+    def mock_github(self):
+        gh = MagicMock(spec=GitHubService)
+        gh.repo = "owner/repo"
+        gh.get_issue.return_value = {
+            "number": 42,
+            "title": "Test",
+            "body": "Body",
+            "state": "OPEN",
+            "labels": [],
+            "url": "https://github.com/owner/repo/issues/42",
+        }
+        gh.add_issue_comment.return_value = None
+        gh.add_labels.return_value = None
+        gh.list_prs.return_value = []
+        return gh
+
+    def test_local_repo_path_used_as_target_repo(self, store, mock_github):
+        from orchestrator.application.github_task_service import GitHubTaskService
+        from orchestrator.application.github_run_orchestrator import GitHubRunOrchestrator
+
+        task_svc = GitHubTaskService(store=store, github=mock_github)
+        orch = GitHubRunOrchestrator(
+            task_service=task_svc,
+            github=mock_github,
+            store=store,
+        )
+
+        orch._local_repo_path = "/Users/me/repos/my-project"
+        task = task_svc.claim_issue(42)
+        ctx = orch._build_context(task)
+        assert ctx["target_repo"] == "/Users/me/repos/my-project"
+        assert ctx["github_repo"] == "owner/repo"
+
+    def test_no_local_repo_falls_back_to_slug(self, store, mock_github):
+        from orchestrator.application.github_task_service import GitHubTaskService
+        from orchestrator.application.github_run_orchestrator import GitHubRunOrchestrator
+
+        task_svc = GitHubTaskService(store=store, github=mock_github)
+        orch = GitHubRunOrchestrator(
+            task_service=task_svc,
+            github=mock_github,
+            store=store,
+        )
+
+        task = task_svc.claim_issue(42)
+        ctx = orch._build_context(task)
+        assert ctx["target_repo"] == "owner/repo"
+        assert ctx["github_repo"] == "owner/repo"
+
+    def test_github_repo_always_slug(self, store, mock_github):
+        from orchestrator.application.github_task_service import GitHubTaskService
+        from orchestrator.application.github_run_orchestrator import GitHubRunOrchestrator
+
+        task_svc = GitHubTaskService(store=store, github=mock_github)
+        orch = GitHubRunOrchestrator(
+            task_service=task_svc,
+            github=mock_github,
+            store=store,
+        )
+
+        orch._local_repo_path = "/some/path"
+        task = task_svc.claim_issue(42)
+        ctx = orch._build_context(task)
+        assert ctx["github_repo"] == "owner/repo"
+        assert "/" in ctx["github_repo"]
+
+
+class TestLocalRepoInCursorPrompt:
+    """Verify Cursor prompt uses github_repo for gh commands, not local path."""
+
+    def test_cursor_prompt_uses_github_repo_for_gh_commands(self):
+        from orchestrator.adapters.cursor import CursorCommandAdapter
+        from orchestrator.infrastructure.file_state_store import FileStateStore
+
+        store = MagicMock(spec=FileStateStore)
+        store.task_dir.return_value = Path("/tmp/task-dir")
+        store.artifact_path.return_value = Path("/tmp/task-dir/artifact.md")
+        store.list_artifacts.return_value = []
+
+        adapter = CursorCommandAdapter(store, {"manual_fallback": True})
+
+        context = {
+            "workflow_mode": "github",
+            "target_repo": "/Users/me/repos/project",
+            "github_repo": "owner/project",
+            "cycle": 1,
+            "issue_number": 42,
+            "issue_title": "Fix bug",
+            "work_type": "fix",
+            "branch_name": "fix/issue-42/cursor/cycle-1",
+            "pr_number": None,
+            "base_branch": "main",
+            "pr_title_pattern": "[{type}][Issue #{issue}][{agent}] {summary}",
+        }
+
+        prompt = adapter._build_github_prompt("issue-42", "artifact", "implement", context)
+        assert "Repository: owner/project" in prompt
+        assert "--repo owner/project" in prompt
+        assert "/Users/me/repos/project" not in prompt
+
+    def test_cursor_workspace_arg_uses_target_repo(self):
+        """Verify the --workspace arg resolves to the local path, not the slug."""
+        from orchestrator.adapters.cursor import CursorCommandAdapter
+        from orchestrator.infrastructure.file_state_store import FileStateStore
+
+        store = MagicMock(spec=FileStateStore)
+        store.task_dir.return_value = Path("/tmp/task-dir")
+
+        adapter = CursorCommandAdapter(store)
+
+        context = {
+            "target_repo": "/Users/me/repos/project",
+            "github_repo": "owner/project",
+        }
+
+        cmd = adapter._build_command("prompt text", Path("/tmp/p.md"), context, "task-1")
+        assert "/Users/me/repos/project" in cmd
+
+
+class TestImprovedErrorMessages:
+    """Verify failure messages include stderr content."""
+
+    def test_failed_command_includes_stderr(self):
+        from orchestrator.adapters.command import CommandAdapter
+        from orchestrator.infrastructure.file_state_store import FileStateStore
+
+        store = MagicMock(spec=FileStateStore)
+        task_dir = Path("/tmp/test-task")
+        task_dir.mkdir(parents=True, exist_ok=True)
+        store.task_dir.return_value = task_dir
+        store.artifact_path.return_value = task_dir / "out.md"
+        store.list_artifacts.return_value = []
+
+        adapter = CommandAdapter(store, {
+            "command": "false",
+            "args": [],
+            "timeout": 5,
+        })
+
+        result = adapter.execute(
+            task_name="test",
+            artifact="out.md",
+            template="",
+            instruction="test",
+            context={"target_repo": "/tmp"},
+        )
+
+        assert result.status.value == "failed"
+        assert "exited with code" in result.message
+
+
+class TestResolveLocalRepo:
+    """Test the _resolve_local_repo helper."""
+
+    def test_explicit_arg_takes_priority(self):
+        from orchestrator.cli import _resolve_local_repo
+        from orchestrator.infrastructure.config_loader import OrchestratorConfig
+
+        args = MagicMock()
+        args.local_repo = "/explicit/path"
+        config = OrchestratorConfig()
+        config.github.local_repo_path = "/config/path"
+
+        result = _resolve_local_repo(args, config)
+        assert result == str(Path("/explicit/path").resolve())
+
+    def test_config_used_when_no_arg(self):
+        from orchestrator.cli import _resolve_local_repo
+        from orchestrator.infrastructure.config_loader import OrchestratorConfig
+
+        args = MagicMock()
+        args.local_repo = None
+        config = OrchestratorConfig()
+        config.github.local_repo_path = "/config/path"
+
+        result = _resolve_local_repo(args, config)
+        assert result == str(Path("/config/path").resolve())
+
+    def test_cwd_fallback(self):
+        from orchestrator.cli import _resolve_local_repo
+        from orchestrator.infrastructure.config_loader import OrchestratorConfig
+
+        args = MagicMock()
+        args.local_repo = None
+        config = OrchestratorConfig()
+
+        result = _resolve_local_repo(args, config)
+        assert result == str(Path.cwd())

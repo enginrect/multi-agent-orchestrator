@@ -78,6 +78,18 @@ class TestParserStructure:
         args = parser.parse_args(["run", "github", "42", "--type", "fix"])
         assert args.type == "fix"
 
+    def test_run_github_with_local_repo(self):
+        parser = build_parser()
+        args = parser.parse_args([
+            "run", "github", "42", "--repo", "o/r", "--local-repo", "/tmp/repo",
+        ])
+        assert args.local_repo == "/tmp/repo"
+
+    def test_run_github_local_repo_default_none(self):
+        parser = build_parser()
+        args = parser.parse_args(["run", "github", "42", "--repo", "o/r"])
+        assert args.local_repo is None
+
     def test_resume_github(self):
         parser = build_parser()
         args = parser.parse_args(["resume", "github", "issue-42"])

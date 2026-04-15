@@ -13,6 +13,7 @@ Authentication is handled externally via ``gh auth login``.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from typing import Any, Optional
 
@@ -123,6 +124,23 @@ class GitHubService:
     def _repo_args(self) -> list[str]:
         return ["--repo", self.repo]
 
+    @staticmethod
+    def _parse_issue_url(raw: str) -> dict[str, Any]:
+        """Extract issue number and URL from ``gh issue create`` output.
+
+        ``gh issue create`` prints a URL like
+        ``https://github.com/owner/repo/issues/123``.
+        """
+        raw = raw.strip()
+        if not raw:
+            raise GitHubError("gh issue create returned empty output")
+        match = re.search(r"/issues/(\d+)", raw)
+        if match:
+            return {"number": int(match.group(1)), "url": raw}
+        raise GitHubError(
+            f"Could not extract issue number from gh output: {raw!r}"
+        )
+
     # ------------------------------------------------------------------
     # Issues
     # ------------------------------------------------------------------
@@ -140,10 +158,16 @@ class GitHubService:
         body: str,
         labels: Optional[list[str]] = None,
     ) -> dict[str, Any]:
+        """Create a GitHub issue and return ``{"number": int, "url": str}``.
+
+        ``gh issue create`` returns a plain URL, not JSON, so this method
+        parses the issue number from the URL.
+        """
         cmd = ["issue", "create", *self._repo_args(), "--title", title, "--body", body]
         for label in labels or []:
             cmd.extend(["--label", label])
-        return self._run_gh(cmd)
+        raw = self._run_gh(cmd, parse_json=False)
+        return self._parse_issue_url(raw)
 
     def add_issue_comment(self, number: int, body: str) -> None:
         self._run_gh([

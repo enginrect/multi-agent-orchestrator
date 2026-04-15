@@ -74,7 +74,7 @@ class TestCreateIssue:
         with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:
             mock.return_value = MagicMock(
                 returncode=0,
-                stdout=json.dumps({"number": 1, "url": "https://..."}),
+                stdout="https://github.com/owner/repo/issues/1\n",
                 stderr="",
             )
             result = svc.create_issue("title", "body", labels=["bug", "urgent"])
@@ -82,6 +82,69 @@ class TestCreateIssue:
         assert "--label" in args
         assert "bug" in args
         assert "urgent" in args
+
+    def test_parses_url_output(self, svc):
+        with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:
+            mock.return_value = MagicMock(
+                returncode=0,
+                stdout="https://github.com/owner/repo/issues/7\n",
+                stderr="",
+            )
+            result = svc.create_issue("title", "body")
+        assert result["number"] == 7
+        assert "issues/7" in result["url"]
+
+    def test_empty_output_raises(self, svc):
+        with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:
+            mock.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            with pytest.raises(GitHubError, match="empty output"):
+                svc.create_issue("title", "body")
+
+    def test_non_url_output_raises(self, svc):
+        with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:
+            mock.return_value = MagicMock(
+                returncode=0, stdout="something unexpected", stderr=""
+            )
+            with pytest.raises(GitHubError, match="Could not extract issue number"):
+                svc.create_issue("title", "body")
+
+    def test_url_with_trailing_whitespace(self, svc):
+        with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:
+            mock.return_value = MagicMock(
+                returncode=0,
+                stdout="  https://github.com/owner/repo/issues/42  \n",
+                stderr="",
+            )
+            result = svc.create_issue("title", "body")
+        assert result["number"] == 42
+
+
+class TestParseIssueUrl:
+    """Unit tests for the static URL parser."""
+
+    def test_standard_url(self):
+        result = GitHubService._parse_issue_url(
+            "https://github.com/owner/repo/issues/123"
+        )
+        assert result == {"number": 123, "url": "https://github.com/owner/repo/issues/123"}
+
+    def test_url_with_newline(self):
+        result = GitHubService._parse_issue_url(
+            "https://github.com/o/r/issues/5\n"
+        )
+        assert result["number"] == 5
+
+    def test_empty_string_raises(self):
+        with pytest.raises(GitHubError, match="empty output"):
+            GitHubService._parse_issue_url("")
+
+    def test_whitespace_only_raises(self):
+        with pytest.raises(GitHubError, match="empty output"):
+            GitHubService._parse_issue_url("   \n  ")
+
+    def test_no_issue_number_raises(self):
+        with pytest.raises(GitHubError, match="Could not extract"):
+            GitHubService._parse_issue_url("https://github.com/owner/repo")
 
 
 class TestAddIssueComment:

@@ -141,12 +141,17 @@ This is the correct path for team-visible, production-grade review workflows.
 
 ```bash
 morch run github 42 --repo owner/name --type feat
+# When the checkout you want agents to use is not the current directory:
+morch run github 42 --repo owner/name --local-repo /path/to/clone
 ```
 
 - Claims a GitHub issue, generates a branch, opens a PR.
 - Agents collaborate through the PR: reviewing, pushing fixes, approving.
 - State is tracked in both local task state and GitHub labels/PR status.
 - Requires `git` and `gh` CLI with repo access.
+- `--local-repo` (or `github.local_repo_path` in config) sets the filesystem
+  path agents use as their workspace. Prompts still pass the GitHub `owner/name`
+  slug to `gh` so PR commands stay correct.
 
 **When to use**: Real issue tracking, team-visible reviews, CI-connected
 workflows, and production repositories.

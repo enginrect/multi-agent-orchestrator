@@ -155,7 +155,7 @@ class CursorCommandAdapter(CommandAdapter):
         instruction: str,
         context: dict[str, Any],
     ) -> str:
-        repo = context.get("target_repo", "")
+        github_repo = context.get("github_repo", "") or context.get("target_repo", "")
         cycle = context.get("cycle", 1)
         issue_number = context.get("issue_number", "")
         issue_title = context.get("issue_title", "")
@@ -185,7 +185,7 @@ class CursorCommandAdapter(CommandAdapter):
             "You are **Cursor**, the primary implementer in a GitHub-native multi-agent workflow.",
             "",
             f"Task: {task_name}",
-            f"Repository: {repo}",
+            f"Repository: {github_repo}",
             f"Issue: #{issue_number} — {issue_title}",
             f"Work type: {type_label}",
             f"Branch: {branch_name}",
@@ -211,7 +211,7 @@ class CursorCommandAdapter(CommandAdapter):
                 f"2. Implement the changes for issue #{issue_number}",
                 f"3. Commit with a descriptive message referencing the issue",
                 f"4. Push: `git push -u origin {branch_name}`",
-                f"5. Open a PR: `gh pr create --repo {repo} "
+                f"5. Open a PR: `gh pr create --repo {github_repo} "
                 f"--title '{pr_title}' "
                 f"--head {branch_name} --base {base_branch} "
                 f"--body 'Resolves #{issue_number}'`",

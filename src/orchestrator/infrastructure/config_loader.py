@@ -73,6 +73,7 @@ class GitHubConfig:
     branch_pattern: str = "{type}/issue-{issue}/{agent}/cycle-{cycle}"
     pr_title_pattern: str = "[{type}][Issue #{issue}][{agent}] {summary}"
     labels: dict[str, str] = field(default_factory=dict)
+    local_repo_path: str = ""
 
 
 @dataclass
@@ -141,6 +142,7 @@ class OrchestratorConfig:
                     "[{type}][Issue #{issue}][{agent}] {summary}",
                 ),
                 labels=gh.get("labels", {}),
+                local_repo_path=gh.get("local_repo_path", ""),
             )
 
         return config

@@ -100,6 +100,7 @@ class GitHubRunOrchestrator:
         self.adapters = adapters or {}
         self.fallback_adapter = fallback_adapter
         self._prompt_content: Optional[str] = None
+        self._local_repo_path: str = ""
 
     def _get_adapter(self, agent: AgentRole) -> Optional[AgentAdapter]:
         adapter = self.adapters.get(agent)
@@ -116,7 +117,8 @@ class GitHubRunOrchestrator:
         ctx: dict[str, Any] = {
             "task": task.to_dict(),
             "cycle": task.cycle,
-            "target_repo": task.repo,
+            "target_repo": self._local_repo_path or task.repo,
+            "github_repo": task.repo,
             "issue_number": task.issue_number,
             "issue_title": task.issue_title,
             "work_type": task.work_type.value,
@@ -142,14 +144,19 @@ class GitHubRunOrchestrator:
         work_type: WorkType = WorkType.FEAT,
         on_step: Optional[Callable[[str], None]] = None,
         prompt_content: Optional[str] = None,
+        local_repo_path: str = "",
     ) -> GitHubRunResult:
         """Claim an issue and drive it through the review pipeline.
 
         Args:
             prompt_content: If provided, injected as detailed task instructions
                 into the adapter context (from a ``--prompt-file``).
+            local_repo_path: Local filesystem path to the git clone. Used as
+                the working directory and workspace path for agent adapters.
+                Defaults to CWD if not provided.
         """
         self._prompt_content = prompt_content
+        self._local_repo_path = local_repo_path
         task = self.task_service.claim_issue(issue_number, work_type=work_type)
 
         self._update_run_status(task, RunStatus.RUNNING)
@@ -179,8 +186,11 @@ class GitHubRunOrchestrator:
         self,
         task_name: str,
         on_step: Optional[Callable[[str], None]] = None,
+        local_repo_path: str = "",
     ) -> GitHubRunResult:
         """Continue a task that was paused waiting for manual completion."""
+        if local_repo_path:
+            self._local_repo_path = local_repo_path
         task = self.task_service.get_task(task_name)
 
         if task.is_terminal:

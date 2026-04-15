@@ -176,7 +176,7 @@ class CommandAdapter(AgentAdapter):
         context: dict[str, Any],
     ) -> str:
         """Build a prompt for GitHub-native workflow mode."""
-        repo = context.get("target_repo", "")
+        github_repo = context.get("github_repo", "") or context.get("target_repo", "")
         cycle = context.get("cycle", 1)
         issue_number = context.get("issue_number", "")
         work_type = context.get("work_type", "feat")
@@ -189,7 +189,7 @@ class CommandAdapter(AgentAdapter):
         parts = [
             f"You are completing a GitHub-native review workflow step.\n\n"
             f"Task: {task_name}\n"
-            f"Repository: {repo}\n"
+            f"Repository: {github_repo}\n"
             f"Issue: #{issue_number}\n"
             f"Work type: {work_type}\n"
             f"Branch: {branch_name}\n"
@@ -353,15 +353,23 @@ class CommandAdapter(AgentAdapter):
         self._write_step_log(task_dir, artifact, proc.stdout, proc.stderr, proc.returncode)
 
         if proc.returncode != 0:
+            stderr_tail = proc.stderr[-500:].strip() if proc.stderr else ""
+            stdout_tail = proc.stdout[-500:].strip() if proc.stdout else ""
             logger.log(
                 "adapter_failed",
                 artifact=artifact,
                 exit_code=proc.returncode,
-                stderr_tail=proc.stderr[-500:] if proc.stderr else "",
+                stderr_tail=stderr_tail,
+                stdout_tail=stdout_tail,
+                working_dir=cwd,
             )
+            detail = stderr_tail or stdout_tail
+            msg = f"Command exited with code {proc.returncode}"
+            if detail:
+                msg = f"{msg}: {detail[:200]}"
             return ExecutionResult(
                 status=ExecutionStatus.FAILED,
-                message=f"Command exited with code {proc.returncode}",
+                message=msg,
             )
 
         artifact_path = self._store.artifact_path(task_name, artifact)
