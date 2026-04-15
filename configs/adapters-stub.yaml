@@ -1,7 +1,7 @@
 # Full stub configuration — all agents auto-complete with canned responses.
 # Useful for testing the orchestration pipeline without real agents.
 #
-# Usage: orchestrator run my-task --target-repo /path -c configs/adapters-stub.yaml
+# Usage: morch --config configs/adapters-stub.yaml run task my-task --target-repo /path
 
 workspace_dir: ./workspace
 template_dir: ./templates/artifacts

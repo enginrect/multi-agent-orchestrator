@@ -16,6 +16,8 @@ from ..domain.models import (
     AgentRole,
     ExecutionStatus,
     RunStatus,
+    Task,
+    TaskState,
     _now_iso,
 )
 from ..infrastructure.config_loader import AgentsConfig
@@ -102,6 +104,19 @@ class PromptRunner:
         self.store.ensure_workspace()
         self.store.create_task_dir(task_name)
 
+        task = Task(
+            name=task_name,
+            target_repo=target_repo,
+            state=TaskState.CURSOR_IMPLEMENTING,
+            run_status=RunStatus.RUNNING,
+            description=f"Prompt-driven task from {path.name}",
+        )
+        task.record_transition(
+            TaskState.CURSOR_IMPLEMENTING,
+            note=f"Prompt task created from {path.name}",
+        )
+        self.store.save_task(task)
+
         logger = RunLogger(self.store.task_dir(task_name))
         logger.log("prompt_run_start", prompt_file=str(path), task_name=task_name)
 
@@ -120,6 +135,8 @@ class PromptRunner:
             if adapter is None:
                 if on_step:
                     on_step(f"No adapter for {agent_name} — run suspended")
+                task.run_status = RunStatus.SUSPENDED
+                self.store.save_task(task)
                 return PromptRunResult(
                     prompt_file=str(path),
                     task_name=task_name,
@@ -130,14 +147,14 @@ class PromptRunner:
 
             if is_first:
                 instruction = prompt_content
-                artifact = f"01-{agent_name}-implementation"
+                artifact = f"01-{agent_name}-implementation.md"
             else:
                 instruction = (
                     f"Review the work done by the previous agent(s). "
                     f"The original prompt is in prompt.md. "
                     f"Check quality, correctness, and completeness."
                 )
-                artifact = f"{i + 1:02d}-{agent_name}-review"
+                artifact = f"{i + 1:02d}-{agent_name}-review.md"
 
             context: dict[str, Any] = {
                 "cycle": 1,
@@ -149,13 +166,17 @@ class PromptRunner:
             }
 
             if on_step:
-                on_step(f"[{agent_name}] Starting {phase}...")
+                on_step(
+                    f"[{agent_name}] Starting {phase} "
+                    f"(adapter: {adapter.name}, capability: {adapter.capability.value})..."
+                )
 
             logger.log(
                 "prompt_step_start",
                 agent=agent_name,
                 phase=phase,
                 adapter=adapter.name,
+                capability=adapter.capability.value,
             )
 
             result = adapter.execute(
@@ -183,8 +204,10 @@ class PromptRunner:
                 if on_step:
                     on_step(
                         f"[{agent_name}] Waiting for manual completion. "
-                        f"Resume: morch resume {task_name}"
+                        f"Resume: morch resume task {task_name}"
                     )
+                task.run_status = RunStatus.SUSPENDED
+                self.store.save_task(task)
                 return PromptRunResult(
                     prompt_file=str(path),
                     task_name=task_name,
@@ -196,6 +219,8 @@ class PromptRunner:
 
             if on_step:
                 on_step(f"[{agent_name}] Failed: {result.message}")
+            task.run_status = RunStatus.SUSPENDED
+            self.store.save_task(task)
             return PromptRunResult(
                 prompt_file=str(path),
                 task_name=task_name,
@@ -207,6 +232,13 @@ class PromptRunner:
         logger.log("prompt_run_complete", steps=len(steps))
         if on_step:
             on_step("All agents completed successfully")
+
+        task.run_status = RunStatus.COMPLETED
+        task.record_transition(
+            TaskState.APPROVED,
+            note="All prompt pipeline agents completed successfully.",
+        )
+        self.store.save_task(task)
 
         return PromptRunResult(
             prompt_file=str(path),

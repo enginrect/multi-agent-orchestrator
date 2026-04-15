@@ -26,7 +26,10 @@ from .command import CommandAdapter
 
 
 class CodexCommandAdapter(CommandAdapter):
-    """Real Codex CLI adapter using ``codex exec``."""
+    """Real Codex CLI adapter using ``codex exec``.
+
+    Delivers prompt via stdin to avoid ARG_MAX issues with long prompts.
+    """
 
     def __init__(
         self,
@@ -35,12 +38,15 @@ class CodexCommandAdapter(CommandAdapter):
     ) -> None:
         merged = {
             "command": "codex",
-            "args": ["exec", "--full-auto", "{prompt}"],
+            "args": ["exec", "--full-auto"],
             "timeout": 600,
             "working_dir": "{task_dir}",
             **(settings or {}),
         }
         super().__init__(store, merged)
+
+    def _use_stdin(self) -> bool:
+        return True
 
     @property
     def name(self) -> str:

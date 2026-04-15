@@ -174,6 +174,29 @@ class GitHubService:
             *self._repo_args(),
         ], parse_json=False)
 
+    def reopen_issue(self, number: int) -> None:
+        self._run_gh([
+            "issue", "reopen", str(number),
+            *self._repo_args(),
+        ], parse_json=False)
+
+    def list_issues(
+        self,
+        state: str = "open",
+        limit: int = 30,
+        labels: Optional[list[str]] = None,
+    ) -> list[dict[str, Any]]:
+        cmd = [
+            "issue", "list",
+            *self._repo_args(),
+            "--state", state,
+            "--limit", str(limit),
+            "--json", "number,title,state,labels,url",
+        ]
+        for label in labels or []:
+            cmd.extend(["--label", label])
+        return self._run_gh(cmd)
+
     # ------------------------------------------------------------------
     # Pull Requests
     # ------------------------------------------------------------------

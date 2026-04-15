@@ -119,3 +119,45 @@ def create_adapters_from_config(
         adapters[role] = create_adapter(role, config, store, renderer)
 
     return adapters
+
+
+_DEFAULT_ADAPTER_TYPE: dict[str, str] = {
+    "cursor": "cursor-cli",
+    "claude": "claude-cli",
+    "codex": "codex-cli",
+}
+
+
+def create_default_adapters(
+    enabled_agents: list[str],
+    store: FileStateStore,
+) -> dict[AgentRole, AgentAdapter]:
+    """Create CLI adapters for enabled agents using default settings.
+
+    Used when no explicit ``adapters:`` section is present in the config.
+    Each supported agent gets its native CLI adapter with default settings,
+    making the workflow automatic without requiring manual adapter
+    configuration.
+
+    Returns:
+        Dict mapping AgentRole to the default CLI adapter for each agent.
+        Agents without a known adapter type are silently skipped.
+    """
+    role_map = {r.value: r for r in AgentRole}
+    adapters: dict[AgentRole, AgentAdapter] = {}
+
+    for agent_name in enabled_agents:
+        role = role_map.get(agent_name)
+        if role is None:
+            continue
+
+        adapter_type = _DEFAULT_ADAPTER_TYPE.get(agent_name)
+        if adapter_type is None:
+            continue
+
+        adapter_config = {"type": adapter_type, "settings": {}}
+        adapters[role] = create_adapter(
+            role, adapter_config, store, TemplateRenderer(""),
+        )
+
+    return adapters

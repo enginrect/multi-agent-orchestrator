@@ -1,5 +1,7 @@
 # Usage Guide
 
+The primary CLI name is **`morch`** (`orchestrator` is the same entry point from `pyproject.toml`). File-artifact flows use nested commands: `morch run task`, `morch resume task`, `morch status task`. For the full command matrix and setup, see [morch.md](morch.md).
+
 ## Installation
 
 ```bash
@@ -48,19 +50,21 @@ See [docs/adapters.md](adapters.md) for full adapter reference.
 Override with `--config` or `--workspace`:
 
 ```bash
-orchestrator --config configs/adapters-mixed.yaml run my-task --target-repo /path
-orchestrator --workspace /path/to/reviews run my-task
+morch --config configs/adapters-mixed.yaml run task my-task --target-repo /path
+morch --workspace /path/to/reviews run task my-task
 ```
 
 ## CLI Commands
 
-### `orchestrator run` (recommended)
+### `morch run task` (recommended)
 
 Create a task and drive the full review pipeline in one command.
 
 ```bash
-orchestrator run <task-name> --target-repo <path> [--description TEXT]
+morch run task <task-name> --target-repo <path> [--description TEXT]
 ```
+
+Backward-compatible alias: `orchestrator run-task <task-name> ...`.
 
 Behavior depends on configured adapters:
 - **All automatic** — runs to completion without stopping
@@ -86,126 +90,138 @@ Example output (manual adapter):
 ```
 [run] Task created: add-metrics (state: cursor_implementing)
 [run] [cursor] Invoking manual adapter for 01-cursor-implementation.md...
-[run] [cursor] Waiting for manual completion. Run: orchestrator resume add-metrics
+[run] [cursor] Waiting for manual completion. Run: morch resume task add-metrics
 
 Task:       add-metrics
 State:      cursor_implementing
 Run status: waiting_on_cursor
 Waiting on: cursor
-Run: orchestrator resume add-metrics
+Run: morch resume task add-metrics
 ```
 
-### `orchestrator resume`
+### `morch resume task`
 
 Continue a task that was paused waiting for manual completion.
 
 ```bash
-orchestrator resume <task-name>
+morch resume task <task-name>
 ```
+
+GitHub-backed tasks use `morch resume github <task-name>`. Backward-compatible alias: `orchestrator github-resume`.
 
 Call this after writing the expected artifact file externally. The
 orchestrator detects the new artifact, advances the state, and continues
 execution until the next pause or completion.
 
-### `orchestrator init`
+### `morch task init`
 
 Create a new review task (manual step-by-step mode).
 
 ```bash
-orchestrator init <task-name> [--target-repo PATH] [--description TEXT]
+morch task init <task-name> [--target-repo PATH] [--description TEXT]
 ```
+
+Backward-compatible alias: `orchestrator init`.
 
 Creates `workspace/active/<task-name>/` with:
 - `state.yaml` — task state
 - `00-scope.md` — scope template (edit this first)
 
-### `orchestrator status`
+### `morch status task`
 
 Show current task state and next step.
 
 ```bash
-orchestrator status <task-name>
+morch status task <task-name>
 ```
 
-### `orchestrator next`
+### `morch task next`
 
 Show detailed next-step instructions. In manual mode, this prints
 what the operator needs to do.
 
 ```bash
-orchestrator next <task-name>
+morch task next <task-name>
 ```
 
-### `orchestrator advance`
+Backward-compatible alias: `orchestrator next`.
+
+### `morch task advance`
 
 Advance the task to the next state after completing a step (manual mode).
 
 ```bash
-orchestrator advance <task-name> [--outcome approved|changes-requested|minor-fixes-applied]
+morch task advance <task-name> [--outcome approved|changes-requested|minor-fixes-applied]
 ```
+
+Backward-compatible alias: `orchestrator advance`.
 
 The `--outcome` flag is optional. The orchestrator auto-detects the
 review outcome by parsing `**Status**: ...` from the artifact file.
 
-### `orchestrator validate`
+### `morch task validate`
 
 Check artifact completeness for the current cycle.
 
 ```bash
-orchestrator validate <task-name>
+morch task validate <task-name>
 ```
 
-### `orchestrator archive`
+Backward-compatible alias: `orchestrator validate`.
+
+### `morch task archive`
 
 Move an approved task from `active/` to `archive/`.
 
 ```bash
-orchestrator archive <task-name>
+morch task archive <task-name>
 ```
 
-### `orchestrator list`
+Backward-compatible alias: `orchestrator archive`.
+
+### `morch task list`
 
 List all tasks.
 
 ```bash
-orchestrator list           # Active tasks only
-orchestrator list --all     # Include archived
+morch task list           # Active tasks only
+morch task list --all     # Include archived
 ```
+
+Backward-compatible alias: `orchestrator list`.
 
 ## Workflow: single-command orchestration (mixed real/manual)
 
 ```bash
 # Run with real adapters (recommended config)
-orchestrator run add-metrics-server \
+morch --config configs/adapters-mixed.yaml run task add-metrics-server \
   --target-repo ~/repos/workload-cluster-add-on \
-  --description "Add metrics-server as a platform service" \
-  --config configs/adapters-mixed.yaml
+  --description "Add metrics-server as a platform service"
 
 # Cursor step pauses (manual). Implement the changes, write the artifact,
 # then resume:
-orchestrator resume add-metrics-server --config configs/adapters-mixed.yaml
+morch --config configs/adapters-mixed.yaml resume task add-metrics-server
 
 # Claude and Codex run automatically. If approved:
-orchestrator archive add-metrics-server
+morch task archive add-metrics-server
 ```
 
 ## Workflow: full automatic (stub or real)
 
 ```bash
 # All agents auto-complete (stub for testing, or real with all CLIs)
-orchestrator run add-metrics-server \
-  --target-repo ~/repos/workload-cluster-add-on \
-  --config configs/adapters-stub.yaml
+morch --config configs/adapters-stub.yaml run task add-metrics-server \
+  --target-repo ~/repos/workload-cluster-add-on
 
 # Completes without pausing → directly approved
-orchestrator archive add-metrics-server
+morch task archive add-metrics-server
 ```
 
 ## Workflow: manual step-by-step
 
 ```bash
 # 1. Create task
-orchestrator init add-metrics-server \
+morch task init add-metrics-server \
   --target-repo ~/repos/workload-cluster-add-on \
   --description "Add metrics-server as a platform service"
 
@@ -214,26 +230,26 @@ $EDITOR workspace/active/add-metrics-server/00-scope.md
 
 # 3. Implement changes in target repo, then write handoff
 $EDITOR workspace/active/add-metrics-server/01-cursor-implementation.md
-orchestrator advance add-metrics-server
+morch task advance add-metrics-server
 
 # 4. Hand off to Claude — show instructions
-orchestrator next add-metrics-server
+morch task next add-metrics-server
 
 # 5. Claude writes review (on their machine/account)
 $EDITOR workspace/active/add-metrics-server/02-claude-review-cycle-1.md
-orchestrator advance add-metrics-server
+morch task advance add-metrics-server
 
 # 6. If changes requested, Cursor responds
-orchestrator status add-metrics-server  # Check if rework needed
+morch status task add-metrics-server  # Check if rework needed
 $EDITOR workspace/active/add-metrics-server/03-cursor-response-cycle-1.md
-orchestrator advance add-metrics-server
+morch task advance add-metrics-server
 
 # 7. Codex final review
 $EDITOR workspace/active/add-metrics-server/04-codex-review-cycle-1.md
-orchestrator advance add-metrics-server
+morch task advance add-metrics-server
 
 # 8. If approved, archive
-orchestrator archive add-metrics-server
+morch task archive add-metrics-server
 ```
 
 ## Targeting a different repository

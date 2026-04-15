@@ -3,13 +3,17 @@
 Uses ``claude -p`` (print mode) for non-interactive execution. The
 ``--permission-mode auto`` flag auto-approves tool use without prompts.
 
+The prompt is delivered via **stdin**, which is how ``claude -p`` is
+designed to receive input programmatically. This avoids OS argument
+length limits that break with long review prompts.
+
 **Important**: When running via subprocess, always use the real executable
 path (e.g. ``/Users/<user>/.local/bin/claude``), not a shell function or
 alias. Shell functions are not visible to ``subprocess.run()``.
 
 Execution flow:
 1. Constructs a Claude-optimized prompt with task context and previous artifacts
-2. Runs ``claude -p --permission-mode auto --allowedTools ... "<prompt>"``
+2. Pipes the prompt to ``claude -p --permission-mode auto ...`` via stdin
 3. Verifies the expected artifact was written
 4. Detects review outcome from artifact content
 
@@ -29,7 +33,12 @@ from .command import CommandAdapter
 
 
 class ClaudeCommandAdapter(CommandAdapter):
-    """Real Claude Code CLI adapter using ``claude -p``."""
+    """Real Claude Code CLI adapter using ``claude -p``.
+
+    Delivers prompt via stdin (not CLI arg) to avoid ARG_MAX issues
+    with long prompts. The ``-p`` flag reads from stdin when no
+    positional prompt argument is provided.
+    """
 
     def __init__(
         self,
@@ -46,7 +55,6 @@ class ClaudeCommandAdapter(CommandAdapter):
                 "-p",
                 "--permission-mode", permission_mode,
                 "--allowedTools", allowed_tools,
-                "{prompt}",
             ],
             "timeout": 300,
             "working_dir": "{task_dir}",
@@ -55,6 +63,9 @@ class ClaudeCommandAdapter(CommandAdapter):
         for consumed_key in ("allowed_tools", "permission_mode"):
             merged.pop(consumed_key, None)
         super().__init__(store, merged)
+
+    def _use_stdin(self) -> bool:
+        return True
 
     @property
     def name(self) -> str:

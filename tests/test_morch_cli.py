@@ -117,6 +117,18 @@ class TestParserStructure:
         args = parser.parse_args(["task", "list", "--all"])
         assert args.all is True
 
+    def test_watch_task(self):
+        parser = build_parser()
+        args = parser.parse_args(["watch", "task", "my-task"])
+        assert args.task_name == "my-task"
+        assert args.watch_command == "task"
+        assert hasattr(args, "func")
+
+    def test_watch_task_with_interval(self):
+        parser = build_parser()
+        args = parser.parse_args(["watch", "task", "my-task", "--interval", "5"])
+        assert args.interval == 5
+
 
 class TestBackwardCompat:
     """Old orchestrator-style commands should still parse."""

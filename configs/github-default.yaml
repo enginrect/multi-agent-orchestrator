@@ -1,8 +1,8 @@
 # GitHub-native orchestrator configuration
 #
 # Usage:
-#   morch run github 42 --repo owner/name --type feat --config configs/github-default.yaml
-#   morch resume github issue-42 --config configs/github-default.yaml
+#   morch --config configs/github-default.yaml run github 42 --repo owner/name --type feat
+#   morch --config configs/github-default.yaml resume github issue-42
 
 workspace_dir: ./workspace
 max_cycles: 2

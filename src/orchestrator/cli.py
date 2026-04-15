@@ -4,21 +4,29 @@ Primary command: ``morch``
 Backward-compatible alias: ``orchestrator``
 
 Command groups:
-    morch doctor                     System health check
-    morch auth status                All auth status
-    morch auth <tool> status         Per-tool auth check
-    morch auth <tool> login          Show login instructions
-    morch agents list                Show configured agent order
-    morch agents doctor              Check agent readiness
-    morch agents order <a> <b> [c]   Set agent execution order
-    morch config show                Show effective configuration
-    morch run prompt <path.md>       Markdown-prompt driven execution
-    morch run task <name>            File-artifact review pipeline
-    morch run github <issue>         GitHub-native issue pipeline
-    morch resume <task-name>         Resume a paused task
-    morch resume github <task-name>  Resume a GitHub task
-    morch status <task-name>         Show task status
-    morch status github <task-name>  Show GitHub task status
+    morch doctor                      System health check
+    morch auth status                 All auth status
+    morch auth <tool> status          Per-tool auth check
+    morch auth <tool> login           Show login instructions
+    morch agents list                 Show configured agent order
+    morch agents doctor               Check agent readiness
+    morch agents order <a> <b> [c]    Set agent execution order
+    morch config show                 Show effective configuration
+    morch run prompt <path.md>        Markdown-prompt driven execution
+    morch run task <name>             File-artifact review pipeline
+    morch run github <issue>          GitHub-native issue pipeline
+    morch issue create                Create a GitHub issue
+    morch issue list                  List GitHub issues
+    morch issue view <number>         View issue details
+    morch issue reopen <number>       Reopen a closed issue
+    morch issue start                 Create issue + start workflow
+    morch prompt list-templates       List available prompt templates
+    morch prompt init <name>          Copy template to local file
+    morch resume task <task-name>     Resume a paused file-artifact task
+    morch resume github <task-name>   Resume a GitHub task
+    morch status task <task-name>     Show file-artifact task status
+    morch status github <task-name>   Show GitHub task status
+    morch watch task <task-name>      Live-watch task progress
     morch task init/advance/validate/archive/list
 """
 
@@ -28,7 +36,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .adapters.factory import create_adapters_from_config
+from .adapters.factory import create_adapters_from_config, create_default_adapters
 from .adapters.manual import ManualAdapter
 from .application.artifact_service import ArtifactService
 from .application.github_run_orchestrator import GitHubRunOrchestrator, GitHubRunResult
@@ -94,6 +102,23 @@ def _build_services(
     return task_svc, engine, config
 
 
+def _resolve_adapters(
+    config: OrchestratorConfig,
+    store: FileStateStore,
+    renderer: TemplateRenderer,
+) -> dict:
+    """Resolve adapters from config or auto-create defaults for enabled agents.
+
+    When an explicit ``adapters:`` section exists in the config, those
+    adapters are used. Otherwise, default CLI adapters are created for
+    each enabled agent (cursor-cli, claude-cli, codex-cli), making
+    workflows automatic without requiring manual adapter configuration.
+    """
+    if config.adapters:
+        return create_adapters_from_config(config.adapters, store, renderer)
+    return create_default_adapters(config.agents.enabled, store)
+
+
 def _build_run_orchestrator(args: argparse.Namespace) -> tuple[RunOrchestrator, OrchestratorConfig]:
     config = _load_config(args)
     store, renderer = _resolve_paths(config)
@@ -102,11 +127,7 @@ def _build_run_orchestrator(args: argparse.Namespace) -> tuple[RunOrchestrator, 
     task_svc = TaskService(config, store, renderer, artifact_svc)
 
     manual_fallback = ManualAdapter(store, renderer)
-
-    if config.adapters:
-        adapters = create_adapters_from_config(config.adapters, store, renderer)
-    else:
-        adapters = {}
+    adapters = _resolve_adapters(config, store, renderer)
 
     run_orch = RunOrchestrator(
         task_service=task_svc,
@@ -143,11 +164,7 @@ def _build_github_orchestrator(
     )
 
     manual_fallback = ManualAdapter(store, renderer)
-
-    if config.adapters:
-        adapters = create_adapters_from_config(config.adapters, store, renderer)
-    else:
-        adapters = {}
+    adapters = _resolve_adapters(config, store, renderer)
 
     orch = GitHubRunOrchestrator(
         task_service=task_service,
@@ -350,10 +367,7 @@ def cmd_run_prompt(args: argparse.Namespace) -> None:
     store, renderer = _resolve_paths(config)
 
     manual_fallback = ManualAdapter(store, renderer)
-    if config.adapters:
-        adapters = create_adapters_from_config(config.adapters, store, renderer)
-    else:
-        adapters = {}
+    adapters = _resolve_adapters(config, store, renderer)
 
     target_repo = _resolve_target_repo(
         getattr(args, "target_repo", "") or config.default_target_repo
@@ -388,7 +402,7 @@ def cmd_run_prompt(args: argparse.Namespace) -> None:
 
     if result.waiting_on:
         print(f"\nWaiting on: {result.waiting_on}")
-        print(f"Resume: morch resume {result.task_name}")
+        print(f"Resume: morch resume task {result.task_name}")
     elif result.is_complete:
         print("\nAll agents completed successfully.")
     else:
@@ -424,6 +438,15 @@ def cmd_run_task(args: argparse.Namespace) -> None:
 # ------------------------------------------------------------------
 
 
+def _read_prompt_file(path_str: str) -> str:
+    """Read a prompt file and return its content, or exit on error."""
+    p = Path(path_str)
+    if not p.is_file():
+        print(f"Error: prompt file not found: {p}", file=sys.stderr)
+        sys.exit(1)
+    return p.read_text()
+
+
 def cmd_run_github(args: argparse.Namespace) -> None:
     """Claim a GitHub issue and drive it through the review pipeline."""
     orch, config = _build_github_orchestrator(args)
@@ -436,6 +459,11 @@ def cmd_run_github(args: argparse.Namespace) -> None:
         print(f"Error: unknown work type '{work_type_str}'. Valid: {valid}", file=sys.stderr)
         sys.exit(1)
 
+    prompt_content = None
+    prompt_file_path = getattr(args, "prompt_file", None)
+    if prompt_file_path:
+        prompt_content = _read_prompt_file(prompt_file_path)
+
     def on_step(msg: str) -> None:
         print(f"[github] {msg}")
 
@@ -443,6 +471,7 @@ def cmd_run_github(args: argparse.Namespace) -> None:
         issue_number=args.issue_number,
         work_type=work_type,
         on_step=on_step,
+        prompt_content=prompt_content,
     )
 
     _print_github_run_result(result)
@@ -548,6 +577,240 @@ def cmd_status_github(args: argparse.Namespace) -> None:
         print(f"PR URL:       {task.pr_url}")
     print(f"Created:      {task.created_at}")
     print(f"Updated:      {task.updated_at}")
+
+
+# ------------------------------------------------------------------
+# watch
+# ------------------------------------------------------------------
+
+
+def cmd_watch_task(args: argparse.Namespace) -> None:
+    """Live-poll task state and run log until interrupted."""
+    import json
+    import time as _time
+
+    config = _load_config(args)
+    store, _ = _resolve_paths(config)
+    task_name = args.task_name
+    interval = getattr(args, "interval", 3)
+
+    try:
+        while True:
+            task = store.load_task(task_name)
+            task_dir = store.task_dir(task_name)
+
+            elapsed = ""
+            try:
+                from datetime import datetime, timezone
+
+                created = datetime.fromisoformat(task.created_at)
+                now = datetime.now(timezone.utc)
+                delta = now - created
+                elapsed = f"{int(delta.total_seconds())}s"
+            except Exception:
+                elapsed = "?"
+
+            next_artifact = ""
+            if task.history:
+                last = task.history[-1]
+                next_artifact = last.artifact or ""
+
+            print("\033[2J\033[H", end="")
+            print(f"=== morch watch: {task_name} ===\n")
+            print(f"  State:        {task.state.value}")
+            print(f"  Run status:   {task.run_status.value}")
+            print(f"  Cycle:        {task.cycle} / {task.max_cycles}")
+            print(f"  Elapsed:      {elapsed}")
+            if next_artifact:
+                print(f"  Last artifact: {next_artifact}")
+            print()
+
+            log_path = task_dir / "run.log"
+            if log_path.is_file():
+                lines = log_path.read_text().splitlines()
+                tail = lines[-10:] if len(lines) > 10 else lines
+                print("  --- run log (last 10 events) ---")
+                for line in tail:
+                    try:
+                        entry = json.loads(line)
+                        ts = entry.get("timestamp", "")[:19]
+                        evt = entry.get("event", "?")
+                        extra = {
+                            k: v
+                            for k, v in entry.items()
+                            if k not in ("timestamp", "event")
+                        }
+                        extra_str = " ".join(f"{k}={v}" for k, v in extra.items())
+                        print(f"  {ts} [{evt}] {extra_str}")
+                    except json.JSONDecodeError:
+                        print(f"  {line[:120]}")
+            else:
+                print("  (no run log yet)")
+
+            if task.is_terminal:
+                print(f"\n  Task reached terminal state: {task.state.value}")
+                break
+
+            print(f"\n  Refreshing in {interval}s... (Ctrl+C to stop)")
+            _time.sleep(interval)
+    except KeyboardInterrupt:
+        print("\n  Watch stopped.")
+
+
+# ------------------------------------------------------------------
+# issue lifecycle
+# ------------------------------------------------------------------
+
+
+def _build_github_service(args: argparse.Namespace) -> tuple[GitHubService, OrchestratorConfig]:
+    config = _load_config(args)
+    repo = getattr(args, "repo", None) or config.github.repo
+    if not repo:
+        print("Error: --repo is required (or set github.repo in config)", file=sys.stderr)
+        sys.exit(1)
+    return GitHubService(repo), config
+
+
+def cmd_issue_create(args: argparse.Namespace) -> None:
+    """Create a new GitHub issue."""
+    gh, _ = _build_github_service(args)
+    labels = [l.strip() for l in (args.labels or "").split(",") if l.strip()] or None
+    body = args.body or ""
+
+    if getattr(args, "prompt_file", None):
+        prompt = _read_prompt_file(args.prompt_file)
+        if body:
+            body = f"{body}\n\n---\n\n{prompt}"
+        else:
+            body = prompt
+
+    result = gh.create_issue(title=args.title, body=body, labels=labels)
+    url = result.get("url", "")
+    number = result.get("number", "?")
+    print(f"Issue created: #{number}")
+    if url:
+        print(f"URL: {url}")
+
+
+def cmd_issue_list(args: argparse.Namespace) -> None:
+    """List GitHub issues."""
+    gh, _ = _build_github_service(args)
+    state = getattr(args, "state", "open") or "open"
+    issues = gh.list_issues(state=state)
+    if not issues:
+        print(f"No {state} issues found.")
+        return
+    for issue in issues:
+        labels = ", ".join(l.get("name", "") for l in issue.get("labels", []))
+        label_str = f" [{labels}]" if labels else ""
+        print(f"  #{issue['number']:>5}  {issue.get('state', ''):>6}  {issue.get('title', '')}{label_str}")
+
+
+def cmd_issue_view(args: argparse.Namespace) -> None:
+    """View a GitHub issue."""
+    gh, _ = _build_github_service(args)
+    issue = gh.get_issue(args.issue_number)
+    print(f"Issue:    #{issue.get('number', '?')}")
+    print(f"Title:    {issue.get('title', '')}")
+    print(f"State:    {issue.get('state', '')}")
+    print(f"URL:      {issue.get('url', '')}")
+    labels = [l.get("name", "") for l in issue.get("labels", [])]
+    if labels:
+        print(f"Labels:   {', '.join(labels)}")
+    body = issue.get("body", "") or ""
+    if body:
+        print(f"\n{body[:500]}")
+
+
+def cmd_issue_reopen(args: argparse.Namespace) -> None:
+    """Reopen a closed GitHub issue."""
+    gh, _ = _build_github_service(args)
+    gh.reopen_issue(args.issue_number)
+    print(f"Issue #{args.issue_number} reopened.")
+
+
+def cmd_issue_start(args: argparse.Namespace) -> None:
+    """Create a new issue and immediately start the GitHub workflow."""
+    gh, config = _build_github_service(args)
+
+    body = args.body or ""
+    prompt_content = None
+    if getattr(args, "prompt_file", None):
+        prompt_content = _read_prompt_file(args.prompt_file)
+        if body:
+            body = f"{body}\n\n---\n\n{prompt_content}"
+        else:
+            body = prompt_content
+
+    result = gh.create_issue(title=args.title, body=body)
+    issue_number = result.get("number")
+    if not issue_number:
+        print("Error: could not determine issue number from creation result", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Issue #{issue_number} created: {args.title}")
+
+    args.issue_number = issue_number
+    orch, _ = _build_github_orchestrator(args)
+
+    work_type_str = getattr(args, "type", "feat") or "feat"
+    try:
+        work_type = WorkType(work_type_str)
+    except ValueError:
+        work_type = WorkType.FEAT
+
+    def on_step(msg: str) -> None:
+        print(f"[github] {msg}")
+
+    run_result = orch.run(
+        issue_number=issue_number,
+        work_type=work_type,
+        on_step=on_step,
+        prompt_content=prompt_content,
+    )
+
+    _print_github_run_result(run_result)
+
+
+# ------------------------------------------------------------------
+# prompt template management
+# ------------------------------------------------------------------
+
+PROMPT_TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates" / "prompts"
+
+
+def cmd_prompt_list_templates(args: argparse.Namespace) -> None:
+    """List available prompt templates."""
+    if not PROMPT_TEMPLATES_DIR.is_dir():
+        print("No prompt templates found.")
+        return
+    templates = sorted(f.stem for f in PROMPT_TEMPLATES_DIR.glob("*.md"))
+    if not templates:
+        print("No prompt templates found.")
+        return
+    print("Available prompt templates:\n")
+    for name in templates:
+        print(f"  {name}")
+    print(f"\nUsage: morch prompt init <name> --output .morch/prompts/my-task.md")
+
+
+def cmd_prompt_init(args: argparse.Namespace) -> None:
+    """Copy a prompt template to a user-local file."""
+    import shutil
+    template_name = args.template_name
+    source = PROMPT_TEMPLATES_DIR / f"{template_name}.md"
+    if not source.is_file():
+        print(f"Error: template not found: {template_name}", file=sys.stderr)
+        available = sorted(f.stem for f in PROMPT_TEMPLATES_DIR.glob("*.md")) if PROMPT_TEMPLATES_DIR.is_dir() else []
+        if available:
+            print(f"Available: {', '.join(available)}", file=sys.stderr)
+        sys.exit(1)
+
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, output)
+    print(f"Template '{template_name}' copied to: {output}")
+    print(f"Edit the file, then use it with: morch run github <issue> --prompt-file {output}")
 
 
 # ------------------------------------------------------------------
@@ -786,7 +1049,61 @@ def build_parser() -> argparse.ArgumentParser:
         "--type", default="feat",
         help="Work type: feat, modify, fix, refactor, docs, chore, ops, test, hotfix",
     )
+    p_run_gh.add_argument(
+        "--prompt-file", default=None,
+        help="Path to a detailed prompt file for agent instructions",
+    )
     p_run_gh.set_defaults(func=cmd_run_github)
+
+    # ---- issue ----
+    p_issue = sub.add_parser("issue", help="GitHub issue lifecycle")
+    issue_sub = p_issue.add_subparsers(dest="issue_command", required=True)
+
+    p_issue_create = issue_sub.add_parser("create", help="Create a new GitHub issue")
+    p_issue_create.add_argument("--repo", "-r", default="", help="GitHub repository (owner/name)")
+    p_issue_create.add_argument("--title", required=True, help="Issue title")
+    p_issue_create.add_argument("--body", "-b", default="", help="Issue body")
+    p_issue_create.add_argument("--labels", "-l", default="", help="Comma-separated labels")
+    p_issue_create.add_argument("--prompt-file", default=None, help="Prompt file to include in body")
+    p_issue_create.set_defaults(func=cmd_issue_create)
+
+    p_issue_list = issue_sub.add_parser("list", help="List GitHub issues")
+    p_issue_list.add_argument("--repo", "-r", default="", help="GitHub repository (owner/name)")
+    p_issue_list.add_argument("--state", "-s", default="open", choices=["open", "closed", "all"], help="Issue state filter")
+    p_issue_list.set_defaults(func=cmd_issue_list)
+
+    p_issue_view = issue_sub.add_parser("view", help="View a GitHub issue")
+    p_issue_view.add_argument("issue_number", type=int, help="Issue number")
+    p_issue_view.add_argument("--repo", "-r", default="", help="GitHub repository (owner/name)")
+    p_issue_view.set_defaults(func=cmd_issue_view)
+
+    p_issue_reopen = issue_sub.add_parser("reopen", help="Reopen a closed GitHub issue")
+    p_issue_reopen.add_argument("issue_number", type=int, help="Issue number")
+    p_issue_reopen.add_argument("--repo", "-r", default="", help="GitHub repository (owner/name)")
+    p_issue_reopen.set_defaults(func=cmd_issue_reopen)
+
+    p_issue_start = issue_sub.add_parser("start", help="Create issue and start workflow immediately")
+    p_issue_start.add_argument("--repo", "-r", default="", help="GitHub repository (owner/name)")
+    p_issue_start.add_argument("--title", required=True, help="Issue title")
+    p_issue_start.add_argument("--body", "-b", default="", help="Issue body")
+    p_issue_start.add_argument("--prompt-file", default=None, help="Prompt file for detailed instructions")
+    p_issue_start.add_argument(
+        "--type", default="feat",
+        help="Work type: feat, modify, fix, refactor, docs, chore, ops, test, hotfix",
+    )
+    p_issue_start.set_defaults(func=cmd_issue_start)
+
+    # ---- prompt ----
+    p_prompt = sub.add_parser("prompt", help="Prompt template management")
+    prompt_sub = p_prompt.add_subparsers(dest="prompt_command", required=True)
+
+    p_prompt_list = prompt_sub.add_parser("list-templates", help="List available prompt templates")
+    p_prompt_list.set_defaults(func=cmd_prompt_list_templates)
+
+    p_prompt_init = prompt_sub.add_parser("init", help="Copy a prompt template to a local file")
+    p_prompt_init.add_argument("template_name", help="Template name (without .md)")
+    p_prompt_init.add_argument("--output", "-o", required=True, help="Output file path")
+    p_prompt_init.set_defaults(func=cmd_prompt_init)
 
     # ---- resume ----
     p_resume = sub.add_parser("resume", help="Resume a paused task")
@@ -814,6 +1131,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_status_task = status_sub.add_parser("task", help="Show file-artifact task status")
     p_status_task.add_argument("task_name", help="Task name")
     p_status_task.set_defaults(func=cmd_status)
+
+    # ---- watch ----
+    p_watch = sub.add_parser("watch", help="Live-watch task progress")
+    watch_sub = p_watch.add_subparsers(dest="watch_command", required=True)
+
+    p_watch_task = watch_sub.add_parser("task", help="Watch a task's state and run log")
+    p_watch_task.add_argument("task_name", help="Task name to watch")
+    p_watch_task.add_argument(
+        "--interval", "-n", type=int, default=3,
+        help="Refresh interval in seconds (default: 3)",
+    )
+    p_watch_task.set_defaults(func=cmd_watch_task)
 
     # ---- task (manual subcommands) ----
     p_task = sub.add_parser("task", help="Manual task management")
@@ -890,6 +1219,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ghrun_compat.add_argument("issue_number", type=int)
     p_ghrun_compat.add_argument("--repo", "-r", default="")
     p_ghrun_compat.add_argument("--type", default="feat")
+    p_ghrun_compat.add_argument("--prompt-file", default=None)
     p_ghrun_compat.set_defaults(func=cmd_run_github)
 
     p_ghresume_compat = sub.add_parser("github-resume", help=argparse.SUPPRESS)

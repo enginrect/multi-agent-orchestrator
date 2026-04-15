@@ -197,7 +197,7 @@ adapters:
 ```
 
 This writes a prompt file and returns WAITING, identical to ManualAdapter
-behavior. The human implements changes and runs `orchestrator resume`.
+behavior. The human implements changes and runs `morch resume task <task>`.
 
 ## Smoke tests
 
@@ -248,15 +248,14 @@ ls -la /usr/local/bin/cursor
 
 ```bash
 # Create a test task with stub adapters (no real agents)
-orchestrator run smoke-test \
-  --target-repo /tmp/test-repo \
-  --config configs/adapters-stub.yaml
+morch --config configs/adapters-stub.yaml run task smoke-test \
+  --target-repo /tmp/test-repo
 
 # Verify task completed
-orchestrator status smoke-test
+morch status task smoke-test
 
 # Clean up
-orchestrator archive smoke-test
+morch task archive smoke-test
 ```
 
 ## Example configs

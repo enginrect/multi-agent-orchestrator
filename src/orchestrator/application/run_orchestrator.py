@@ -320,7 +320,7 @@ class RunOrchestrator:
                 if on_step:
                     on_step(
                         f"[{next_step.agent.value}] Waiting for manual completion. "
-                        f"Run: orchestrator resume {task_name}"
+                        f"Run: morch resume task {task_name}"
                     )
 
                 return RunResult(

@@ -34,5 +34,8 @@ workspace/archive/*/
 # Claude local settings
 .claude/
 
+# morch user-local prompts and state (not committed)
+.morch/
+
 # Reports
 report/

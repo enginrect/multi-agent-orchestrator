@@ -10,7 +10,7 @@
 # - /Users/enginrect/.local/bin/claude (authenticated)
 # - /opt/homebrew/bin/codex (OPENAI_API_KEY set)
 #
-# Usage: morch run task my-task --target-repo /path -c configs/adapters-real.yaml
+# Usage: morch --config configs/adapters-real.yaml run task my-task --target-repo /path
 
 workspace_dir: ./workspace
 template_dir: ./templates/artifacts

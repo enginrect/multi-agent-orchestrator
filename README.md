@@ -6,12 +6,12 @@ with explicit state tracking, cycle enforcement, and human escalation.
 
 ## What it does
 
-- **Prompt-driven execution** — `morch run prompt task.md` sends a markdown
-  prompt through the configured agent pipeline
-- **File-artifact workflow** — `morch run task` drives a structured review
-  pipeline with handoff documents
-- **GitHub-native workflow** — `morch run github` manages the full
-  issue → branch → PR → review → merge lifecycle
+- **Prompt-driven (local)** — `morch run prompt task.md` sends a markdown
+  prompt through the agent pipeline locally, no GitHub interaction
+- **File-artifact (local)** — `morch run task` drives a structured review
+  pipeline with handoff documents and state tracking
+- **GitHub-native (remote)** — `morch run github 42 --repo o/r` manages the
+  full issue → branch → PR → review lifecycle on GitHub
 - **Agent ordering** — configurable 2- or 3-agent pipelines with
   `morch agents order`
 - **Auth management** — `morch doctor` and `morch auth` verify tool readiness
@@ -32,9 +32,8 @@ morch doctor
 morch run prompt task-description.md --target-repo /path/to/repo
 
 # File-artifact: structured review pipeline
-morch run task add-ingress-service \
-  --target-repo /path/to/repo \
-  --config configs/adapters-real.yaml
+morch --config configs/adapters-real.yaml run task add-ingress-service \
+  --target-repo /path/to/repo
 
 # GitHub-native: issue-driven pipeline
 morch run github 42 --repo myorg/myapp --type feat
@@ -58,15 +57,17 @@ morch auth status                    Auth status for all tools
 morch auth <tool> status             Per-tool auth check
 morch agents list                    Show configured agent order
 morch agents doctor                  Check agent readiness
+morch agents order <a> <b> [c]       Validate/display agent order (persist in config)
 morch config show                    Show effective configuration
 
 morch run prompt <path.md>           Markdown-prompt driven execution
 morch run task <name>                File-artifact review pipeline
 morch run github <issue>             GitHub-native issue pipeline
-morch resume task <task>              Resume a paused task
-morch resume github <task>           Resume a GitHub task
-morch status task <task>             Show task status
+morch resume task <task>             Resume a paused file-artifact task
+morch resume github <task>           Resume a paused GitHub task
+morch status task <task>             Show file-artifact task status
 morch status github <task>           Show GitHub task status
+morch watch task <task>              Live-watch task state and run log
 
 morch task init/advance/validate/archive/list
 ```

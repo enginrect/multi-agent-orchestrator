@@ -2,14 +2,17 @@
 
 Base implementation for all command-execution adapters. Handles:
 - Subprocess invocation with configurable command, args, env, cwd, timeout
+- Prompt delivery via CLI arg or stdin (subclass-controlled)
 - Prompt file writing for auditability
 - Per-step log capture (stdout/stderr)
 - Artifact existence verification after command execution
 - Review outcome detection from written artifacts
+- Live progress spinner during long-running commands
 - Structured error handling (timeout, command-not-found, non-zero exit)
 
 Subclasses (CodexCommandAdapter, ClaudeCommandAdapter, etc.) override
 ``_build_prompt`` and ``_build_command`` to customize for their agent.
+Subclasses that need stdin delivery override ``_use_stdin`` to return True.
 """
 
 from __future__ import annotations
@@ -17,6 +20,9 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -31,6 +37,60 @@ from ..infrastructure.run_logger import RunLogger
 from .base import AgentAdapter
 
 DEFAULT_TIMEOUT = 300  # 5 minutes
+
+_SPINNER_CHARS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+class _ProgressSpinner:
+    """Thread-based progress indicator for long-running subprocess steps."""
+
+    def __init__(
+        self,
+        task_name: str,
+        agent: str,
+        phase: str,
+        output=None,
+    ) -> None:
+        self._task_name = task_name
+        self._agent = agent
+        self._phase = phase
+        self._output = output or sys.stderr
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._start_time = 0.0
+
+    def start(self) -> None:
+        self._start_time = time.monotonic()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+
+    def _run(self) -> None:
+        idx = 0
+        while not self._stop.is_set():
+            elapsed = time.monotonic() - self._start_time
+            char = _SPINNER_CHARS[idx % len(_SPINNER_CHARS)]
+            msg = (
+                f"\r{char} [{self._agent}] {self._phase} "
+                f"| task: {self._task_name} "
+                f"| elapsed: {int(elapsed)}s"
+            )
+            try:
+                self._output.write(msg)
+                self._output.flush()
+            except OSError:
+                break
+            idx += 1
+            self._stop.wait(0.5)
+        try:
+            self._output.write("\r" + " " * 80 + "\r")
+            self._output.flush()
+        except OSError:
+            pass
 
 
 class CommandAdapter(AgentAdapter):
@@ -124,7 +184,9 @@ class CommandAdapter(AgentAdapter):
         pr_number = context.get("pr_number", "")
         base_branch = context.get("base_branch", "main")
 
-        return (
+        prompt_content = context.get("prompt_content", "")
+
+        parts = [
             f"You are completing a GitHub-native review workflow step.\n\n"
             f"Task: {task_name}\n"
             f"Repository: {repo}\n"
@@ -134,12 +196,22 @@ class CommandAdapter(AgentAdapter):
             f"PR: {'#' + str(pr_number) if pr_number else '(not yet created)'}\n"
             f"Base branch: {base_branch}\n"
             f"Cycle: {cycle}\n\n"
-            f"## Instruction\n\n{instruction}\n\n"
+            f"## Instruction\n\n{instruction}\n\n",
+        ]
+
+        if prompt_content:
+            parts.append(
+                f"## Detailed task prompt\n\n{prompt_content}\n\n"
+            )
+
+        parts.append(
             f"## Safety rules\n\n"
             f"- Do NOT push to {base_branch} directly\n"
             f"- Work only on branch: {branch_name}\n"
             f"- All changes go through pull requests\n"
         )
+
+        return "".join(parts)
 
     def _build_command(
         self,
@@ -178,6 +250,14 @@ class CommandAdapter(AgentAdapter):
             "{target_repo}", target_repo or task_dir
         )
 
+    def _use_stdin(self) -> bool:
+        """Whether to deliver the prompt via stdin instead of CLI arg.
+
+        Subclasses override this to return True when their CLI expects
+        stdin input (e.g. ``claude -p`` reads from stdin).
+        """
+        return False
+
     # ------------------------------------------------------------------
     # Core execution
     # ------------------------------------------------------------------
@@ -202,6 +282,10 @@ class CommandAdapter(AgentAdapter):
         env = self._build_env()
         cwd = self._resolve_working_dir(context, task_name)
 
+        stdin_text: Optional[str] = None
+        if self._use_stdin():
+            stdin_text = prompt
+
         _KNOWN_PLACEHOLDERS = ("{prompt}", "{prompt_file}", "{target_repo}", "{task_dir}")
         unresolved = [
             token
@@ -223,11 +307,18 @@ class CommandAdapter(AgentAdapter):
             command=cmd[0],
             timeout=self._timeout,
             working_dir=cwd,
+            stdin="yes" if stdin_text else "no",
         )
+
+        agent = context.get("agent", self.name)
+        phase = context.get("phase", artifact)
+        spinner = _ProgressSpinner(task_name, agent, phase)
+        spinner.start()
 
         try:
             proc = subprocess.run(
                 cmd,
+                input=stdin_text,
                 capture_output=True,
                 text=True,
                 timeout=self._timeout,
@@ -235,6 +326,7 @@ class CommandAdapter(AgentAdapter):
                 cwd=cwd,
             )
         except subprocess.TimeoutExpired as e:
+            spinner.stop()
             logger.log("adapter_timeout", artifact=artifact, timeout=self._timeout)
             self._write_step_log(task_dir, artifact, e.stdout or "", e.stderr or "", -1)
             return ExecutionResult(
@@ -242,17 +334,21 @@ class CommandAdapter(AgentAdapter):
                 message=f"Command timed out after {self._timeout}s",
             )
         except FileNotFoundError:
+            spinner.stop()
             logger.log("adapter_command_not_found", command=cmd[0])
             return ExecutionResult(
                 status=ExecutionStatus.FAILED,
                 message=f"Command not found: {cmd[0]}",
             )
         except OSError as e:
+            spinner.stop()
             logger.log("adapter_error", error=str(e))
             return ExecutionResult(
                 status=ExecutionStatus.FAILED,
                 message=f"OS error: {e}",
             )
+        finally:
+            spinner.stop()
 
         self._write_step_log(task_dir, artifact, proc.stdout, proc.stderr, proc.returncode)
 

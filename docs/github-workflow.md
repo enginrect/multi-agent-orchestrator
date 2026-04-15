@@ -191,12 +191,12 @@ These constraints are enforced in code:
 Claim an issue and drive it through the full review pipeline.
 
 ```bash
-orchestrator github-run <issue-number> --repo owner/name [--type TYPE] [--config file]
+orchestrator [--config file] github-run <issue-number> --repo owner/name [--type TYPE]
 ```
 
 Example:
 ```bash
-orchestrator github-run 42 --repo myorg/myapp --type feat --config configs/github-default.yaml
+orchestrator --config configs/github-default.yaml github-run 42 --repo myorg/myapp --type feat
 orchestrator github-run 99 --repo myorg/myapp --type fix
 orchestrator github-run 15 --repo myorg/docs --type docs
 ```
@@ -206,12 +206,12 @@ orchestrator github-run 15 --repo myorg/docs --type docs
 Continue a task that was paused waiting for manual completion.
 
 ```bash
-orchestrator github-resume <task-name> [--repo owner/name] [--config file]
+orchestrator [--config file] github-resume <task-name> [--repo owner/name]
 ```
 
 Example:
 ```bash
-orchestrator github-resume issue-42 --config configs/github-default.yaml
+orchestrator --config configs/github-default.yaml github-resume issue-42
 ```
 
 ### `github-status`
@@ -219,7 +219,7 @@ orchestrator github-resume issue-42 --config configs/github-default.yaml
 Show the current status of a GitHub-backed task.
 
 ```bash
-orchestrator github-status <task-name> [--repo owner/name] [--config file]
+orchestrator [--config file] github-status <task-name> [--repo owner/name]
 ```
 
 ## Configuration
@@ -277,11 +277,11 @@ local state tracking. Commands are separate:
 
 | File-based | GitHub-native |
 |------------|---------------|
-| `orchestrator run` | `orchestrator github-run` |
-| `orchestrator resume` | `orchestrator github-resume` |
-| `orchestrator status` | `orchestrator github-status` |
-| `orchestrator init` | (issue serves as init) |
-| `orchestrator advance` | (automatic via PR state) |
+| `morch run task` (alias: `orchestrator run-task`) | `morch run github` (alias: `orchestrator github-run`) |
+| `morch resume task` | `morch resume github` (alias: `orchestrator github-resume`) |
+| `morch status task` | `morch status github` (alias: `orchestrator github-status`) |
+| `morch task init` (alias: `orchestrator init`) | (issue serves as init) |
+| `morch task advance` (alias: `orchestrator advance`) | (automatic via PR state) |
 
 Local `state.yaml` files in the workspace track the orchestrator's
 internal state for GitHub tasks, but the primary collaboration surface

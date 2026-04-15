@@ -99,6 +99,7 @@ class GitHubRunOrchestrator:
         self.store = store
         self.adapters = adapters or {}
         self.fallback_adapter = fallback_adapter
+        self._prompt_content: Optional[str] = None
 
     def _get_adapter(self, agent: AgentRole) -> Optional[AgentAdapter]:
         adapter = self.adapters.get(agent)
@@ -112,7 +113,7 @@ class GitHubRunOrchestrator:
         self.task_service._save_github_task(task)
 
     def _build_context(self, task: GitHubTask) -> dict[str, Any]:
-        return {
+        ctx: dict[str, Any] = {
             "task": task.to_dict(),
             "cycle": task.cycle,
             "target_repo": task.repo,
@@ -127,6 +128,9 @@ class GitHubRunOrchestrator:
             "agent": "",
             "workflow_mode": "github",
         }
+        if self._prompt_content:
+            ctx["prompt_content"] = self._prompt_content
+        return ctx
 
     # ------------------------------------------------------------------
     # Public API
@@ -137,18 +141,30 @@ class GitHubRunOrchestrator:
         issue_number: int,
         work_type: WorkType = WorkType.FEAT,
         on_step: Optional[Callable[[str], None]] = None,
+        prompt_content: Optional[str] = None,
     ) -> GitHubRunResult:
-        """Claim an issue and drive it through the review pipeline."""
+        """Claim an issue and drive it through the review pipeline.
+
+        Args:
+            prompt_content: If provided, injected as detailed task instructions
+                into the adapter context (from a ``--prompt-file``).
+        """
+        self._prompt_content = prompt_content
         task = self.task_service.claim_issue(issue_number, work_type=work_type)
 
         self._update_run_status(task, RunStatus.RUNNING)
 
-        logger = RunLogger(self.store.task_dir(task.name))
+        task_dir = self.store.task_dir(task.name)
+        if prompt_content:
+            (task_dir / "prompt.md").write_text(prompt_content)
+
+        logger = RunLogger(task_dir)
         logger.log(
             "github_run_start",
             task_name=task.name,
             issue_number=issue_number,
             repo=task.repo,
+            has_prompt_file=bool(prompt_content),
         )
 
         if on_step:

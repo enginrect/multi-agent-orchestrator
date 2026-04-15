@@ -7,8 +7,8 @@
 # Use this when you want reviews automated but prefer to implement
 # changes yourself (or when cursor CLI is not available).
 #
-# Usage: orchestrator run my-task --target-repo /path -c configs/adapters-mixed.yaml
-# Then:  orchestrator resume my-task -c configs/adapters-mixed.yaml
+# Usage: morch --config configs/adapters-mixed.yaml run task my-task --target-repo /path
+# Then:  morch --config configs/adapters-mixed.yaml resume task my-task
 
 workspace_dir: ./workspace
 template_dir: ./templates/artifacts

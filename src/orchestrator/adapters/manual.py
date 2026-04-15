@@ -80,13 +80,13 @@ class ManualAdapter(AgentAdapter):
             f"## What to do\n\n{instruction}\n\n"
             f"## Artifact file\n\n"
             f"Edit `{artifact}` in this directory, then run:\n\n"
-            f"```bash\norchestrator resume {task_name}\n```\n"
+            f"```bash\nmorch resume task {task_name}\n```\n"
         )
         instruction_file.write_text(instruction_content)
 
         msg = (
             f"Manual step required for {artifact}. "
-            f"Edit the file, then run: orchestrator resume {task_name}"
+            f"Edit the file, then run: morch resume task {task_name}"
         )
 
         if not isinstance(self._output, io.StringIO):
@@ -96,7 +96,7 @@ class ManualAdapter(AgentAdapter):
                 f"Artifact: {artifact}\n"
                 f"Template: {artifact_path}\n\n"
                 f"{instruction}\n\n"
-                f"After completing, run: orchestrator resume {task_name}\n"
+                f"After completing, run: morch resume task {task_name}\n"
                 f"---\n\n"
             )
 

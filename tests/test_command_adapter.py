@@ -5,8 +5,10 @@ Covers:
 - Artifact existence verification after execution
 - Per-step log file creation
 - CodexCommandAdapter prompt construction
-- ClaudeCommandAdapter prompt construction
+- ClaudeCommandAdapter prompt construction and stdin delivery
 - CursorCommandAdapter manual fallback
+- Progress spinner lifecycle
+- stdin vs arg delivery mode
 """
 
 from pathlib import Path
@@ -15,7 +17,7 @@ import subprocess
 
 import pytest
 
-from orchestrator.adapters.command import CommandAdapter
+from orchestrator.adapters.command import CommandAdapter, _ProgressSpinner
 from orchestrator.adapters.codex import CodexCommandAdapter
 from orchestrator.adapters.claude_adapter import ClaudeCommandAdapter
 from orchestrator.adapters.cursor import CursorCommandAdapter
@@ -518,3 +520,182 @@ class TestPlaceholderInterpolation:
 
         assert str(task_dir) in " ".join(cmd)
         assert "{target_repo}" not in " ".join(cmd)
+
+
+# ======================================================================
+# Claude stdin delivery
+# ======================================================================
+
+
+class TestClaudeStdinDelivery:
+    """Verify that ClaudeCommandAdapter delivers prompt via stdin."""
+
+    def test_claude_uses_stdin(self, store):
+        adapter = ClaudeCommandAdapter(store)
+        assert adapter._use_stdin() is True
+
+    def test_claude_args_have_no_prompt_placeholder(self, store):
+        adapter = ClaudeCommandAdapter(store)
+        args = adapter._settings.get("args", [])
+        assert "{prompt}" not in args
+
+    def test_claude_command_invoked_with_stdin_input(self, store, task_dir):
+        """subprocess.run must receive input= with prompt text."""
+        adapter = ClaudeCommandAdapter(store, {"timeout": 5})
+        artifact = "02-claude-review-cycle-1.md"
+        (task_dir / artifact).write_text("# Review\n\n**Status**: approved\n")
+
+        with patch("orchestrator.adapters.command.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            adapter.execute("test-task", artifact, "tpl", "Review this", _make_context())
+
+        call_kwargs = mock_run.call_args
+        assert call_kwargs.kwargs.get("input") is not None or call_kwargs[1].get("input") is not None
+        stdin_input = call_kwargs.kwargs.get("input") or call_kwargs[1].get("input")
+        assert "Claude" in stdin_input
+        assert "test-task" in stdin_input
+
+    def test_claude_prompt_not_in_command_args(self, store, task_dir):
+        """The rendered prompt must NOT appear as a CLI arg (only via stdin)."""
+        adapter = ClaudeCommandAdapter(store, {"timeout": 5})
+        artifact = "02-claude-review-cycle-1.md"
+        (task_dir / artifact).write_text("# Review\n\n**Status**: approved\n")
+
+        with patch("orchestrator.adapters.command.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            adapter.execute("test-task", artifact, "tpl", "Review this", _make_context())
+
+        cmd = mock_run.call_args[0][0]
+        joined = " ".join(cmd)
+        assert "You are **Claude**" not in joined
+
+    def test_claude_long_prompt_handled_safely(self, store, task_dir):
+        """Even very long prompts should not fail since they go via stdin."""
+        adapter = ClaudeCommandAdapter(store, {"timeout": 5})
+        artifact = "02-claude-review-cycle-1.md"
+        (task_dir / artifact).write_text("# Review\n\n**Status**: approved\n")
+
+        long_instruction = "Review " * 50000
+
+        with patch("orchestrator.adapters.command.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            result = adapter.execute(
+                "test-task", artifact, "tpl", long_instruction, _make_context()
+            )
+
+        assert result.status == ExecutionStatus.COMPLETED
+        stdin_input = mock_run.call_args.kwargs.get("input") or mock_run.call_args[1].get("input")
+        assert len(stdin_input) > 100000
+
+
+# ======================================================================
+# Codex stdin delivery
+# ======================================================================
+
+
+class TestCodexStdinDelivery:
+    """Verify that CodexCommandAdapter delivers prompt via stdin."""
+
+    def test_codex_uses_stdin(self, store):
+        adapter = CodexCommandAdapter(store)
+        assert adapter._use_stdin() is True
+
+    def test_codex_args_have_no_prompt_placeholder(self, store):
+        adapter = CodexCommandAdapter(store)
+        args = adapter._settings.get("args", [])
+        assert "{prompt}" not in args
+
+    def test_codex_command_invoked_with_stdin_input(self, store, task_dir):
+        adapter = CodexCommandAdapter(store, {"timeout": 5})
+        artifact = "04-codex-review-cycle-1.md"
+        (task_dir / artifact).write_text("# Review\n\n**Status**: approved\n")
+
+        with patch("orchestrator.adapters.command.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            adapter.execute("test-task", artifact, "tpl", "Review this", _make_context())
+
+        call_kwargs = mock_run.call_args
+        stdin_input = call_kwargs.kwargs.get("input") or call_kwargs[1].get("input")
+        assert stdin_input is not None
+        assert "Codex" in stdin_input
+
+
+# ======================================================================
+# Cursor does NOT use stdin (arg-based delivery)
+# ======================================================================
+
+
+class TestCursorArgDelivery:
+    """CursorCommandAdapter delivers prompt via CLI arg, not stdin."""
+
+    def test_cursor_does_not_use_stdin(self, store):
+        adapter = CursorCommandAdapter(store, {})
+        assert adapter._use_stdin() is False
+
+    def test_cursor_command_has_no_stdin_input(self, store, task_dir):
+        adapter = CursorCommandAdapter(store, {"timeout": 5})
+        artifact = "01-cursor-implementation.md"
+        (task_dir / artifact).write_text("# Impl\n")
+
+        with patch("orchestrator.adapters.command.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            adapter.execute("test-task", artifact, "tpl", "Do it", _make_context())
+
+        call_kwargs = mock_run.call_args
+        stdin_input = call_kwargs.kwargs.get("input") or call_kwargs[1].get("input")
+        assert stdin_input is None
+
+
+# ======================================================================
+# Progress spinner
+# ======================================================================
+
+
+class TestProgressSpinner:
+    def test_spinner_starts_and_stops(self):
+        import io
+        buf = io.StringIO()
+        spinner = _ProgressSpinner("my-task", "claude", "review", output=buf)
+        spinner.start()
+        import time
+        time.sleep(1.2)
+        spinner.stop()
+        output = buf.getvalue()
+        assert "claude" in output
+        assert "my-task" in output
+        assert "review" in output
+
+    def test_spinner_shows_elapsed_time(self):
+        import io
+        import time
+        buf = io.StringIO()
+        spinner = _ProgressSpinner("task-x", "codex", "validate", output=buf)
+        spinner.start()
+        time.sleep(1.5)
+        spinner.stop()
+        assert "elapsed:" in buf.getvalue()
+
+    def test_spinner_stop_is_idempotent(self):
+        import io
+        buf = io.StringIO()
+        spinner = _ProgressSpinner("t", "a", "p", output=buf)
+        spinner.start()
+        spinner.stop()
+        spinner.stop()
+
+    def test_execute_starts_and_stops_spinner(self, store, task_dir):
+        """The spinner must be active during subprocess execution."""
+        adapter = CommandAdapter(store, {"command": "echo", "args": [], "timeout": 10})
+        artifact = "01-impl.md"
+        (task_dir / artifact).write_text("# Impl\n")
+
+        with patch("orchestrator.adapters.command.subprocess.run") as mock_run, \
+             patch("orchestrator.adapters.command._ProgressSpinner") as mock_spinner_cls:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            mock_spinner = MagicMock()
+            mock_spinner_cls.return_value = mock_spinner
+
+            adapter.execute("test-task", artifact, "tpl", "Do it", _make_context())
+
+            mock_spinner.start.assert_called_once()
+            mock_spinner.stop.assert_called()

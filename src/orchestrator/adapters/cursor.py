@@ -110,7 +110,7 @@ class CursorCommandAdapter(CommandAdapter):
                 message=(
                     f"Cursor manual fallback: implement and write {artifact}. "
                     f"Prompt saved to .prompt-{artifact}.md. "
-                    f"Then run: orchestrator resume {task_name}"
+                    f"Then run: morch resume task {task_name}"
                 ),
             )
 

@@ -17,7 +17,11 @@ from orchestrator.adapters.claude_adapter import ClaudeCommandAdapter
 from orchestrator.adapters.codex import CodexCommandAdapter
 from orchestrator.adapters.command import CommandAdapter
 from orchestrator.adapters.cursor import CursorCommandAdapter
-from orchestrator.adapters.factory import create_adapter, create_adapters_from_config
+from orchestrator.adapters.factory import (
+    create_adapter,
+    create_adapters_from_config,
+    create_default_adapters,
+)
 from orchestrator.adapters.manual import ManualAdapter
 from orchestrator.adapters.stub import StubAdapter
 from orchestrator.domain.models import AgentRole
@@ -145,6 +149,49 @@ class TestCreateAdaptersFromConfig:
     def test_empty_config(self, store, renderer):
         adapters = create_adapters_from_config({}, store, renderer)
         assert len(adapters) == 0
+
+
+# ======================================================================
+# create_default_adapters — auto-create from enabled agents
+# ======================================================================
+
+
+class TestCreateDefaultAdapters:
+    def test_all_three_agents(self, store):
+        adapters = create_default_adapters(["cursor", "claude", "codex"], store)
+        assert len(adapters) == 3
+        assert isinstance(adapters[AgentRole.CURSOR], CursorCommandAdapter)
+        assert isinstance(adapters[AgentRole.CLAUDE], ClaudeCommandAdapter)
+        assert isinstance(adapters[AgentRole.CODEX], CodexCommandAdapter)
+
+    def test_two_agents(self, store):
+        adapters = create_default_adapters(["claude", "codex"], store)
+        assert len(adapters) == 2
+        assert AgentRole.CURSOR not in adapters
+        assert isinstance(adapters[AgentRole.CLAUDE], ClaudeCommandAdapter)
+        assert isinstance(adapters[AgentRole.CODEX], CodexCommandAdapter)
+
+    def test_all_automatic_capability(self, store):
+        from orchestrator.domain.models import AdapterCapability
+
+        adapters = create_default_adapters(["cursor", "claude", "codex"], store)
+        for adapter in adapters.values():
+            assert adapter.capability == AdapterCapability.AUTOMATIC
+
+    def test_unknown_agent_skipped(self, store):
+        adapters = create_default_adapters(["cursor", "unknown"], store)
+        assert len(adapters) == 1
+        assert AgentRole.CURSOR in adapters
+
+    def test_empty_list(self, store):
+        adapters = create_default_adapters([], store)
+        assert len(adapters) == 0
+
+    def test_correct_adapter_names(self, store):
+        adapters = create_default_adapters(["cursor", "claude", "codex"], store)
+        assert adapters[AgentRole.CURSOR].name == "cursor-cli"
+        assert adapters[AgentRole.CLAUDE].name == "claude-cli"
+        assert adapters[AgentRole.CODEX].name == "codex-cli"
 
 
 # ======================================================================
