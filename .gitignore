@@ -1,0 +1,41 @@
+# IDE and editor
+.cursor/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# AI agent working notes
+.tasks/
+
+# Legacy docs (reference only)
+.docs/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Workspace task state (local, not committed)
+workspace/active/*/
+workspace/archive/*/
+!workspace/active/.gitkeep
+!workspace/archive/.gitkeep
+
+# OS
+.DS_Store
+
+# Claude local settings
+.claude/
+
+# morch user-local prompts and state (not committed)
+.morch/
+
+# Reports
+report/

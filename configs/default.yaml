@@ -1,0 +1,11 @@
+# Default configuration for morch (multi-agent orchestrator).
+#
+# Override with: morch --config /path/to/config.yaml
+
+workspace_dir: ./workspace
+template_dir: ./templates/artifacts
+max_cycles: 2
+default_target_repo: ""
+
+agents:
+  enabled: [cursor, claude, codex]
