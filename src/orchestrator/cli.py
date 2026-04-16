@@ -174,12 +174,14 @@ def _build_github_orchestrator(
     manual_fallback = ManualAdapter(store, renderer)
     adapters = _resolve_adapters(config, store, renderer)
 
+    local_repo = getattr(args, "local_repo", None) or config.github.local_repo_path
     orch = GitHubRunOrchestrator(
         task_service=task_service,
         github=github,
         store=store,
         adapters=adapters,
         fallback_adapter=manual_fallback,
+        local_repo_path=local_repo,
     )
     return orch, config
 
@@ -1064,6 +1066,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompt-file", default=None,
         help="Path to a detailed prompt file for agent instructions",
     )
+    p_run_gh.add_argument("--local-repo", default=None, help="Absolute path to local git clone (default: CWD)")
     p_run_gh.set_defaults(func=cmd_run_github)
 
     # ---- issue ----
@@ -1099,6 +1102,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_issue_start.add_argument("--body", "-b", default="", help="Issue body")
     p_issue_start.add_argument("--prompt-file", default=None, help="Prompt file for detailed instructions")
     p_issue_start.add_argument("--type", default="feat", help=WORK_TYPE_ARG_HELP)
+    p_issue_start.add_argument("--local-repo", default=None, help="Absolute path to local git clone (default: CWD)")
     p_issue_start.set_defaults(func=cmd_issue_start)
 
     # ---- prompt ----
@@ -1120,6 +1124,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_resume_github = resume_sub.add_parser("github", help="Resume a GitHub-backed task")
     p_resume_github.add_argument("task_name", help="Task name (e.g. issue-42)")
     p_resume_github.add_argument("--repo", "-r", default="", help="GitHub repository")
+    p_resume_github.add_argument("--local-repo", default=None, help="Absolute path to local git clone (default: CWD)")
     p_resume_github.set_defaults(func=cmd_resume_github)
 
     # resume <task-name> (file-artifact, when not "github")
@@ -1228,11 +1233,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_ghrun_compat.add_argument("--repo", "-r", default="")
     p_ghrun_compat.add_argument("--type", default="feat", help=WORK_TYPE_ARG_HELP)
     p_ghrun_compat.add_argument("--prompt-file", default=None)
+    p_ghrun_compat.add_argument("--local-repo", default=None)
     p_ghrun_compat.set_defaults(func=cmd_run_github)
 
     p_ghresume_compat = sub.add_parser("github-resume", help=argparse.SUPPRESS)
     p_ghresume_compat.add_argument("task_name")
     p_ghresume_compat.add_argument("--repo", "-r", default="")
+    p_ghresume_compat.add_argument("--local-repo", default=None)
     p_ghresume_compat.set_defaults(func=cmd_resume_github)
 
     p_ghstatus_compat = sub.add_parser("github-status", help=argparse.SUPPRESS)

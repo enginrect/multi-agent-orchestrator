@@ -98,6 +98,7 @@ class GitHubRunOrchestrator:
         store: FileStateStore,
         adapters: Optional[dict[AgentRole, AgentAdapter]] = None,
         fallback_adapter: Optional[AgentAdapter] = None,
+        local_repo_path: Optional[str] = None,
     ) -> None:
         self.task_service = task_service
         self.github = github
@@ -105,6 +106,7 @@ class GitHubRunOrchestrator:
         self.adapters = adapters or {}
         self.fallback_adapter = fallback_adapter
         self._prompt_content: Optional[str] = None
+        self.local_repo_path = local_repo_path
 
     def _get_adapter(self, agent: AgentRole) -> Optional[AgentAdapter]:
         adapter = self.adapters.get(agent)
@@ -118,10 +120,12 @@ class GitHubRunOrchestrator:
         self.task_service._save_github_task(task)
 
     def _build_context(self, task: GitHubTask) -> dict[str, Any]:
+        local_path = self.local_repo_path or task.repo
         ctx: dict[str, Any] = {
             "task": task.to_dict(),
             "cycle": task.cycle,
-            "target_repo": task.repo,
+            "target_repo": local_path,
+            "github_repo": task.repo,
             "issue_number": task.issue_number,
             "issue_title": task.issue_title,
             "work_type": task.work_type.value,
