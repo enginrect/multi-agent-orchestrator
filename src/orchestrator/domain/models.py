@@ -8,6 +8,10 @@ from enum import Enum
 from typing import Optional
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 class AgentRole(str, Enum):
     """Agents participating in the review workflow."""
 
@@ -132,8 +136,8 @@ class Task:
     run_status: RunStatus = RunStatus.IDLE
     cycle: int = 1
     max_cycles: int = 2
-    created_at: str = field(default_factory=lambda: _now_iso())
-    updated_at: str = field(default_factory=lambda: _now_iso())
+    created_at: str = field(default_factory=_now_iso)
+    updated_at: str = field(default_factory=_now_iso)
     description: str = ""
     history: list[StateTransition] = field(default_factory=list)
 
@@ -214,7 +218,3 @@ class Task:
             description=data.get("description", ""),
             history=history,
         )
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")

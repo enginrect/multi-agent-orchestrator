@@ -42,18 +42,22 @@ single-command execution.
 │    run · resume · init · advance · status    │
 ├─────────────────────────────────────────────┤
 │              Application                     │
-│  RunOrchestrator · TaskService · ArtifactSvc │
+│  RunOrchestrator · GitHubRunOrchestrator     │
+│  TaskService · GitHubTaskService             │
+│  ArtifactSvc · PromptRunner · WorkflowEngine │
 ├─────────────────────────────────────────────┤
 │               Domain                         │
 │  Task · TaskState · RunStatus · StateMachine │
-│  AdapterCapability · ExecutionResult         │
+│  GitHubTask · GitHubTaskState · WorkType     │
+│  Provenance · AdapterCapability              │
 ├────────────────────┬────────────────────────┤
 │  Infrastructure    │      Adapters              │
 │  FileStateStore    │  ManualAdapter (MANUAL)    │
 │  TemplateRenderer  │  StubAdapter (AUTOMATIC)   │
 │  ConfigLoader      │  CommandAdapter (base)     │
-│  RunLogger         │  CodexCLI / ClaudeCLI     │
-│                    │  CursorCLI / Factory       │
+│  AuthChecker       │  CodexCLI / ClaudeCLI     │
+│  RunLogger         │  CursorCLI / Factory       │
+│  GitHubService     │                            │
 └────────────────────┴──────────────────────────┘
 ```
 
@@ -81,6 +85,19 @@ Pure Python, no I/O, no external dependencies.
   `TaskNotFoundError`, `TaskAlreadyExistsError`, `ArtifactMissingError`,
   `MaxCyclesExceededError`.
 
+- **`github_models.py`** — GitHub-native domain: `GitHubTask`,
+  `GitHubTaskState`, `WorkType`, `WORK_TYPE_LABELS`, and the GitHub
+  transition table with `validate_github_transition()`.
+
+- **`github_workflow.py`** — Step resolution for GitHub-backed tasks.
+  `resolve_github_next_step()` determines the next action based on
+  GitHub task state. Also provides `generate_branch_name()` and
+  `generate_pr_title()`.
+
+- **`provenance.py`** — Agent attribution templates for GitHub-visible
+  text: issue comments, PR body blocks, review headers, and commit
+  message prefixes.
+
 ### Application (`src/orchestrator/application/`)
 
 Use case orchestration. Depends on domain and infrastructure interfaces.
@@ -107,6 +124,17 @@ Use case orchestration. Depends on domain and infrastructure interfaces.
 - **`workflow_engine.py`** — Legacy single-step orchestration. Still used
   by `next` command for instruction generation.
 
+- **`prompt_runner.py`** — Markdown-prompt driven execution. Accepts a
+  prompt file and drives it through the configured agent pipeline
+  without GitHub interaction.
+
+- **`github_task_service.py`** — GitHub-backed task lifecycle: claim
+  issue, create branch, open PR, advance state, and track PR metadata.
+
+- **`github_run_orchestrator.py`** — Single-command execution engine for
+  GitHub-native workflows. Drives the issue → branch → PR → review
+  lifecycle using agent adapters and the GitHub service.
+
 ### Infrastructure (`src/orchestrator/infrastructure/`)
 
 File system operations and configuration.
@@ -121,6 +149,14 @@ File system operations and configuration.
 
 - **`run_logger.py`** — JSONL append-only logger. Writes structured
   entries to `<task-dir>/run.log` for debugging and audit.
+
+- **`auth_checker.py`** — Checks installation and authentication status
+  for all supported tools (cursor, claude, codex, gh, git). Used by
+  `morch doctor` and `morch auth` commands.
+
+- **`github_service.py`** — Thin wrapper around the `gh` CLI for
+  GitHub API operations: issue management, PR creation, branch
+  operations, label management, and PR reviews.
 
 ### Adapters (`src/orchestrator/adapters/`)
 
