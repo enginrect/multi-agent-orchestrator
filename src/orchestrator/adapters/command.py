@@ -242,10 +242,22 @@ class CommandAdapter(AgentAdapter):
         return [cmd, *final_args]
 
     def _resolve_working_dir(self, context: dict[str, Any], task_name: str) -> str:
-        """Determine the working directory for the subprocess."""
-        wd_template = self._settings.get("working_dir", "{task_dir}")
+        """Determine the working directory for the subprocess.
+
+        In GitHub workflow mode, agents need the real git repository as
+        their cwd so that ``gh``, ``git``, and file-reading operations
+        work correctly.  The configured template is only used for
+        non-GitHub (file-artifact) workflows.
+        """
         task_dir = str(self._store.task_dir(task_name))
         target_repo = context.get("target_repo", task_dir)
+
+        if context.get("workflow_mode") == "github" and target_repo:
+            repo_path = Path(target_repo)
+            if repo_path.is_dir():
+                return str(repo_path)
+
+        wd_template = self._settings.get("working_dir", "{task_dir}")
         return wd_template.replace("{task_dir}", task_dir).replace(
             "{target_repo}", target_repo or task_dir
         )

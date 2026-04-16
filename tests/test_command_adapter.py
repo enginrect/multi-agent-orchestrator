@@ -192,6 +192,38 @@ class TestCommandAdapterGitHubMode:
         events = [e["event"] for e in entries]
         assert "adapter_completed_github_mode" in events
 
+    def test_github_mode_uses_target_repo_as_cwd(self, store, task_dir, tmp_path):
+        """In GitHub mode, the subprocess cwd must be the target repo, not the task dir."""
+        target_repo = tmp_path / "target-repo"
+        target_repo.mkdir()
+
+        adapter = CommandAdapter(store, {"command": "echo", "args": [], "timeout": 10})
+        ctx = _make_github_context()
+        ctx["target_repo"] = str(target_repo)
+
+        cwd = adapter._resolve_working_dir(ctx, "test-task")
+        assert cwd == str(target_repo)
+
+    def test_file_mode_uses_task_dir_as_cwd(self, store, task_dir):
+        """In file-artifact mode, cwd stays as the task_dir per configured template."""
+        adapter = CommandAdapter(store, {
+            "command": "echo", "args": [], "timeout": 10,
+            "working_dir": "{task_dir}",
+        })
+        ctx = _make_context()
+
+        cwd = adapter._resolve_working_dir(ctx, "test-task")
+        assert cwd == str(task_dir)
+
+    def test_github_mode_falls_back_to_template_if_target_repo_missing(self, store, task_dir):
+        """If target_repo directory doesn't exist, fall back to template-based resolution."""
+        adapter = CommandAdapter(store, {"command": "echo", "args": [], "timeout": 10})
+        ctx = _make_github_context()
+        ctx["target_repo"] = "/nonexistent/path/that/should/not/exist"
+
+        cwd = adapter._resolve_working_dir(ctx, "test-task")
+        assert cwd == str(task_dir)
+
 
 # ======================================================================
 # CommandAdapter — subprocess failure

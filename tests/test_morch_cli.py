@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-from orchestrator.cli import build_parser, _is_github_task
+from orchestrator.cli import build_parser, _is_github_task, _print_github_task_line
 
 
 class TestParserStructure:
@@ -210,3 +210,64 @@ class TestIsGitHubTask:
             tmp_path / ("archive" if archived else "active") / name
         )
         assert _is_github_task(store, "nonexistent") is False
+
+
+class TestPrintGitHubTaskLine:
+    """Verify _print_github_task_line renders GitHub tasks without crashing."""
+
+    def test_renders_github_task(self, tmp_path, capsys):
+        task_dir = tmp_path / "active" / "issue-12"
+        task_dir.mkdir(parents=True)
+        state = {
+            "name": "issue-12",
+            "repo": "owner/repo",
+            "issue_number": 12,
+            "state": "claude_reviewing",
+            "cycle": 1,
+            "pr_number": 13,
+        }
+        (task_dir / "state.yaml").write_text(yaml.dump(state))
+
+        store = MagicMock()
+        store.task_dir.return_value = task_dir
+
+        _print_github_task_line(store, "issue-12")
+        out = capsys.readouterr().out
+        assert "issue-12" in out
+        assert "claude_reviewing" in out
+        assert "PR#13" in out
+        assert "(github)" in out
+
+    def test_renders_github_task_without_pr(self, tmp_path, capsys):
+        task_dir = tmp_path / "active" / "issue-5"
+        task_dir.mkdir(parents=True)
+        state = {
+            "name": "issue-5",
+            "repo": "owner/repo",
+            "issue_number": 5,
+            "state": "issue_claimed",
+            "cycle": 1,
+        }
+        (task_dir / "state.yaml").write_text(yaml.dump(state))
+
+        store = MagicMock()
+        store.task_dir.return_value = task_dir
+
+        _print_github_task_line(store, "issue-5")
+        out = capsys.readouterr().out
+        assert "issue-5" in out
+        assert "issue_claimed" in out
+        assert "PR#" not in out
+
+    def test_corrupted_state_does_not_crash(self, tmp_path, capsys):
+        task_dir = tmp_path / "active" / "issue-bad"
+        task_dir.mkdir(parents=True)
+        (task_dir / "state.yaml").write_text("::not valid yaml{{{")
+
+        store = MagicMock()
+        store.task_dir.return_value = task_dir
+
+        _print_github_task_line(store, "issue-bad")
+        out = capsys.readouterr().out
+        assert "issue-bad" in out
+        assert "unreadable" in out
