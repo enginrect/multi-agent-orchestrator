@@ -13,6 +13,7 @@ Authentication is handled externally via ``gh auth login``.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from typing import Any, Optional
@@ -370,8 +371,6 @@ class GitHubService:
         (``owner/repo`` format).  Raises :class:`GitHubError` on mismatch
         to prevent cross-repo contamination.
         """
-        import os
-
         if not os.path.isdir(local_repo_path):
             raise GitHubError(
                 f"--local-repo path does not exist or is not a directory: "
