@@ -186,40 +186,40 @@ These constraints are enforced in code:
 
 ## CLI Commands
 
-### `github-run`
+### `morch run github`
 
 Claim an issue and drive it through the full review pipeline.
 
 ```bash
-orchestrator [--config file] github-run <issue-number> --repo owner/name [--type TYPE]
+morch [--config file] run github <issue-number> --repo owner/name [--type TYPE]
 ```
 
 Example:
 ```bash
-orchestrator --config configs/github-default.yaml github-run 42 --repo myorg/myapp --type feat
-orchestrator github-run 99 --repo myorg/myapp --type fix
-orchestrator github-run 15 --repo myorg/docs --type docs
+morch --config configs/github-default.yaml run github 42 --repo myorg/myapp --type feat
+morch run github 99 --repo myorg/myapp --type fix
+morch run github 15 --repo myorg/docs --type docs
 ```
 
-### `github-resume`
+### `morch resume github`
 
 Continue a task that was paused waiting for manual completion.
 
 ```bash
-orchestrator [--config file] github-resume <task-name> [--repo owner/name]
+morch [--config file] resume github <task-name> [--repo owner/name]
 ```
 
 Example:
 ```bash
-orchestrator --config configs/github-default.yaml github-resume issue-42
+morch --config configs/github-default.yaml resume github issue-42
 ```
 
-### `github-status`
+### `morch status github`
 
 Show the current status of a GitHub-backed task.
 
 ```bash
-orchestrator [--config file] github-status <task-name> [--repo owner/name]
+morch [--config file] status github <task-name> [--repo owner/name]
 ```
 
 ## Configuration

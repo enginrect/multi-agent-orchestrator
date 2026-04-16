@@ -172,12 +172,10 @@ def resolve_next_step(task: Task) -> Optional[NextStep]:
         )
 
     if state == TaskState.CURSOR_REWORKING:
-        if cycle == 1:
-            artifact = "03-cursor-response-cycle-1.md"
-            state_after = TaskState.CODEX_REVIEWING
-        else:
-            artifact = "07-cursor-response-cycle-2.md"
-            state_after = TaskState.CODEX_REVIEWING
+        artifact = (
+            "03-cursor-response-cycle-1.md" if cycle == 1
+            else "07-cursor-response-cycle-2.md"
+        )
         return NextStep(
             agent=AgentRole.CURSOR,
             artifact=artifact,
@@ -187,7 +185,7 @@ def resolve_next_step(task: Task) -> Optional[NextStep]:
                 "For each finding, describe the resolution. "
                 "Run validation again and update the response document."
             ),
-            state_after=state_after,
+            state_after=TaskState.CODEX_REVIEWING,
         )
 
     if state == TaskState.CODEX_REVIEWING:

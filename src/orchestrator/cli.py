@@ -592,8 +592,10 @@ def cmd_status_github(args: argparse.Namespace) -> None:
         store=store,
         github=github,
         branch_pattern=config.github.branch_pattern,
+        pr_title_pattern=config.github.pr_title_pattern,
         labels=config.github.labels,
         base_branch=config.github.base_branch,
+        max_cycles=config.max_cycles,
     )
 
     task = task_service.get_task(args.task_name)
