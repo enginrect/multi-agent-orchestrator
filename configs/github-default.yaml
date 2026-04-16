@@ -1,0 +1,43 @@
+# GitHub-native orchestrator configuration
+#
+# Usage:
+#   morch --config configs/github-default.yaml run github 42 --repo owner/name --type feat
+#   morch --config configs/github-default.yaml resume github issue-42
+
+workspace_dir: ./workspace
+template_dir: ./templates/artifacts
+max_cycles: 2
+
+agents:
+  enabled: [cursor, claude, codex]
+
+github:
+  repo: ""                                    # Set via --repo or here: "owner/repo-name"
+  base_branch: "main"
+  branch_pattern: "{type}/issue-{issue}/{agent}/cycle-{cycle}"
+  pr_title_pattern: "[{type}][Issue #{issue}][{agent}] {summary}"
+  labels:
+    claimed: "orchestrator:claimed"
+    in_progress: "orchestrator:in-progress"
+    review: "orchestrator:review"
+    approved: "orchestrator:approved"
+
+# Adapter configuration — same as file-based mode.
+# Agents manage git operations themselves; prompts include
+# GitHub-native instructions (branch, PR, review commands).
+adapters:
+  cursor:
+    type: cursor-cli
+    settings:
+      command: /usr/local/bin/cursor
+      timeout: 1200    # seconds; raise for large prompts (e.g. 1800, 3600)
+  claude:
+    type: claude-cli
+    settings:
+      command: /Users/enginrect/.local/bin/claude
+      timeout: 600
+  codex:
+    type: codex-cli
+    settings:
+      command: /opt/homebrew/bin/codex
+      timeout: 900

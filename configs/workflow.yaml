@@ -1,0 +1,62 @@
+# Workflow definition for the Cursor -> Claude -> Codex review pipeline.
+#
+# This file documents the expected artifact sequence and agent roles.
+# The orchestrator's domain/workflow.py is the code-level source of truth.
+
+agents:
+  - name: cursor
+    role: Primary implementer
+    tool: Cursor IDE
+  - name: claude
+    role: Reviewer + targeted fixer
+    tool: Claude Code / claude.ai
+  - name: codex
+    role: Final reviewer
+    tool: OpenAI Codex CLI
+
+max_cycles: 2
+
+states:
+  - initialized
+  - cursor_implementing
+  - claude_reviewing
+  - cursor_reworking
+  - codex_reviewing
+  - approved
+  - escalated
+  - archived
+
+artifact_sequence:
+  cycle_1:
+    - name: "00-scope.md"
+      author: cursor
+      required: true
+    - name: "01-cursor-implementation.md"
+      author: cursor
+      required: true
+    - name: "02-claude-review-cycle-1.md"
+      author: claude
+      required: true
+    - name: "03-cursor-response-cycle-1.md"
+      author: cursor
+      required: false
+    - name: "04-codex-review-cycle-1.md"
+      author: codex
+      required: true
+    - name: "05-final-approval.md"
+      author: codex
+      required: false
+
+  cycle_2:
+    - name: "06-claude-review-cycle-2.md"
+      author: claude
+      required: true
+    - name: "07-cursor-response-cycle-2.md"
+      author: cursor
+      required: false
+    - name: "08-codex-review-cycle-2.md"
+      author: codex
+      required: true
+    - name: "09-final-approval.md"
+      author: codex
+      required: false
