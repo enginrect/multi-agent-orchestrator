@@ -365,28 +365,42 @@ class CommandAdapter(AgentAdapter):
             )
 
         artifact_path = self._store.artifact_path(task_name, artifact)
-        if not artifact_path.is_file():
-            logger.log("adapter_artifact_missing", artifact=artifact)
+        is_github_mode = context.get("workflow_mode") == "github"
+
+        if artifact_path.is_file():
+            outcome = self._detect_outcome(task_name, artifact)
+            logger.log(
+                "adapter_completed",
+                artifact=artifact,
+                exit_code=0,
+                review_outcome=outcome.value if outcome else None,
+                artifact_on_disk=True,
+            )
             return ExecutionResult(
-                status=ExecutionStatus.FAILED,
-                artifact_written=False,
-                message=f"Command succeeded but artifact not written: {artifact}",
+                status=ExecutionStatus.COMPLETED,
+                artifact_written=True,
+                message=f"Command completed: {artifact}",
+                review_outcome=outcome,
             )
 
-        outcome = self._detect_outcome(task_name, artifact)
+        if is_github_mode:
+            logger.log(
+                "adapter_completed_github_mode",
+                artifact=artifact,
+                exit_code=0,
+                note="Local artifact not required in GitHub workflow mode",
+            )
+            return ExecutionResult(
+                status=ExecutionStatus.COMPLETED,
+                artifact_written=False,
+                message=f"Command completed (GitHub mode): {artifact}",
+            )
 
-        logger.log(
-            "adapter_completed",
-            artifact=artifact,
-            exit_code=0,
-            review_outcome=outcome.value if outcome else None,
-        )
-
+        logger.log("adapter_artifact_missing", artifact=artifact)
         return ExecutionResult(
-            status=ExecutionStatus.COMPLETED,
-            artifact_written=True,
-            message=f"Command completed: {artifact}",
-            review_outcome=outcome,
+            status=ExecutionStatus.FAILED,
+            artifact_written=False,
+            message=f"Command succeeded but artifact not written: {artifact}",
         )
 
     # ------------------------------------------------------------------

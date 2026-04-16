@@ -62,6 +62,19 @@ def _make_context() -> dict:
     }
 
 
+def _make_github_context() -> dict:
+    return {
+        "task": {"name": "test-task"},
+        "cycle": 1,
+        "target_repo": "/tmp/repo",
+        "github_repo": "owner/repo",
+        "issue_number": 42,
+        "branch_name": "feat/issue-42/cursor/cycle-1",
+        "agent": "cursor",
+        "workflow_mode": "github",
+    }
+
+
 # ======================================================================
 # CommandAdapter — subprocess success
 # ======================================================================
@@ -96,6 +109,88 @@ class TestCommandAdapterSuccess:
 
         assert result.status == ExecutionStatus.COMPLETED
         assert result.review_outcome == ReviewOutcome.CHANGES_REQUESTED
+
+
+# ======================================================================
+# CommandAdapter — GitHub mode (no local artifact required)
+# ======================================================================
+
+
+class TestCommandAdapterGitHubMode:
+    def test_github_mode_succeeds_without_artifact_file(self, store, task_dir):
+        """In GitHub mode, command exit 0 is sufficient — no local file needed."""
+        adapter = CommandAdapter(store, {"command": "echo", "args": [], "timeout": 10})
+
+        with patch("orchestrator.adapters.command.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+            result = adapter.execute(
+                "test-task", "github-pr-cycle-1.md", "tpl", "Open PR",
+                _make_github_context(),
+            )
+
+        assert result.status == ExecutionStatus.COMPLETED
+        assert "GitHub mode" in result.message
+
+    def test_github_mode_with_optional_artifact(self, store, task_dir):
+        """If a local artifact is written in GitHub mode, it's used for outcome."""
+        adapter = CommandAdapter(store, {"command": "echo", "args": [], "timeout": 10})
+        artifact = "github-review-cycle-1.md"
+        (task_dir / artifact).write_text("# Review\n\n**Status**: approved\n")
+
+        with patch("orchestrator.adapters.command.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            result = adapter.execute(
+                "test-task", artifact, "tpl", "Review",
+                _make_github_context(),
+            )
+
+        assert result.status == ExecutionStatus.COMPLETED
+        assert result.artifact_written is True
+        assert result.review_outcome == ReviewOutcome.APPROVED
+
+    def test_non_github_mode_still_requires_artifact(self, store, task_dir):
+        """File-artifact mode must keep the mandatory artifact check."""
+        adapter = CommandAdapter(store, {"command": "echo", "args": [], "timeout": 10})
+
+        with patch("orchestrator.adapters.command.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            result = adapter.execute(
+                "test-task", "01-missing.md", "tpl", "Do it",
+                _make_context(),
+            )
+
+        assert result.status == ExecutionStatus.FAILED
+        assert "not written" in result.message
+
+    def test_github_mode_failure_still_fails(self, store, task_dir):
+        """Non-zero exit in GitHub mode is still a failure."""
+        adapter = CommandAdapter(store, {"command": "false", "args": [], "timeout": 10})
+
+        with patch("orchestrator.adapters.command.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="err")
+            result = adapter.execute(
+                "test-task", "github-pr-cycle-1.md", "tpl", "Open PR",
+                _make_github_context(),
+            )
+
+        assert result.status == ExecutionStatus.FAILED
+
+    def test_github_mode_logs_adapter_completed_github_mode(self, store, task_dir):
+        """The run log must record the GitHub-mode completion event."""
+        adapter = CommandAdapter(store, {"command": "echo", "args": [], "timeout": 10})
+
+        with patch("orchestrator.adapters.command.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            adapter.execute(
+                "test-task", "github-pr-cycle-1.md", "tpl", "Open PR",
+                _make_github_context(),
+            )
+
+        from orchestrator.infrastructure.run_logger import RunLogger
+        logger = RunLogger(task_dir)
+        entries = logger.read_entries()
+        events = [e["event"] for e in entries]
+        assert "adapter_completed_github_mode" in events
 
 
 # ======================================================================
