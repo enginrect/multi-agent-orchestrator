@@ -28,6 +28,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from ..domain.models import AgentRole
+from ..domain.provenance import fix_commit_prefix, review_header
 from ..infrastructure.file_state_store import FileStateStore
 from .command import CommandAdapter
 
@@ -156,18 +158,26 @@ class ClaudeCommandAdapter(CommandAdapter):
         instruction: str,
         context: dict[str, Any],
     ) -> str:
-        repo = context.get("target_repo", "")
+        github_repo = context.get("github_repo", "") or context.get("target_repo", "")
         cycle = context.get("cycle", 1)
         issue_number = context.get("issue_number", "")
         branch_name = context.get("branch_name", "")
         pr_number = context.get("pr_number", "")
         base_branch = context.get("base_branch", "main")
 
+        prov_header = review_header(
+            agent=AgentRole.CLAUDE,
+            role="reviewer",
+            pr_number=pr_number,
+            cycle=cycle,
+        )
+        commit_prefix = fix_commit_prefix(AgentRole.CLAUDE, issue_number)
+
         parts = [
-            "You are **Claude**, the first reviewer in a GitHub-native multi-agent workflow.",
+            "You are **Claude** (`@claude-agent`), the first reviewer in a GitHub-native multi-agent workflow.",
             "",
             f"Task: {task_name}",
-            f"Repository: {repo}",
+            f"Repository: {github_repo}",
             f"Issue: #{issue_number}",
             f"PR: #{pr_number}",
             f"Branch: {branch_name}",
@@ -179,14 +189,23 @@ class ClaudeCommandAdapter(CommandAdapter):
             "",
             "## Review workflow",
             "",
-            f"1. Read the PR diff: `gh pr diff {pr_number} --repo {repo}`",
+            f"1. Read the PR diff: `gh pr diff {pr_number} --repo {github_repo}`",
             f"2. Review the changed files thoroughly",
             f"3. If minor fixes are needed, checkout the branch and push commits:",
             f"   `git checkout {branch_name} && git pull origin {branch_name}`",
-            f"   Make changes, commit, and push.",
-            f"4. Post your review:",
-            f"   - If approved: `gh pr review {pr_number} --repo {repo} --approve --body 'LGTM'`",
-            f"   - If changes needed: `gh pr review {pr_number} --repo {repo} --request-changes --body '...'`",
+            f"   Make changes, commit with prefix: `{commit_prefix}`, and push.",
+            f"4. Post your review (MUST include the provenance header below):",
+            f"   - If approved: `gh pr review {pr_number} --repo {github_repo} --approve --body '<review body>'`",
+            f"   - If changes needed: `gh pr review {pr_number} --repo {github_repo} --request-changes --body '<review body>'`",
+            "",
+            "## Review body format",
+            "",
+            "Your review body MUST start with this provenance header:",
+            f"```",
+            prov_header,
+            f"```",
+            "",
+            "Then include your summary, findings, and verdict.",
             "",
             "## Safety rules",
             "",

@@ -30,11 +30,14 @@ from typing import Any, Optional
 
 from ..domain.models import (
     AdapterCapability,
+    AgentRole,
     ExecutionResult,
     ExecutionStatus,
 )
+from ..domain.provenance import pr_body_block
 from ..infrastructure.file_state_store import FileStateStore
 from ..infrastructure.run_logger import RunLogger
+from ..user_hints import resume_task_shell
 from .command import CommandAdapter
 
 
@@ -110,7 +113,7 @@ class CursorCommandAdapter(CommandAdapter):
                 message=(
                     f"Cursor manual fallback: implement and write {artifact}. "
                     f"Prompt saved to .prompt-{artifact}.md. "
-                    f"Then run: morch resume task {task_name}"
+                    f"Then run: {resume_task_shell(task_name)}"
                 ),
             )
 
@@ -155,7 +158,8 @@ class CursorCommandAdapter(CommandAdapter):
         instruction: str,
         context: dict[str, Any],
     ) -> str:
-        repo = context.get("target_repo", "")
+        github_repo = context.get("github_repo", "") or context.get("target_repo", "")
+        repo = github_repo
         cycle = context.get("cycle", 1)
         issue_number = context.get("issue_number", "")
         issue_title = context.get("issue_title", "")
@@ -200,6 +204,14 @@ class CursorCommandAdapter(CommandAdapter):
             "",
         ]
 
+        prov_block = pr_body_block(
+            agent=AgentRole.CURSOR,
+            role="implementation",
+            issue_number=issue_number,
+            cycle=cycle,
+        )
+        pr_body = f"Resolves #{issue_number}\\n\\n{prov_block}"
+
         if pr_number:
             parts.extend([
                 f"A PR (#{pr_number}) is already open. Push follow-up commits to `{branch_name}`.",
@@ -214,7 +226,7 @@ class CursorCommandAdapter(CommandAdapter):
                 f"5. Open a PR: `gh pr create --repo {repo} "
                 f"--title '{pr_title}' "
                 f"--head {branch_name} --base {base_branch} "
-                f"--body 'Resolves #{issue_number}'`",
+                f"--body $'{pr_body}'`",
                 "",
             ])
 

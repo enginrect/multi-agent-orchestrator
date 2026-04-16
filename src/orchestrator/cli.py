@@ -57,6 +57,14 @@ from .infrastructure.config_loader import (
 from .infrastructure.file_state_store import FileStateStore
 from .infrastructure.github_service import GitHubService
 from .infrastructure.template_renderer import TemplateRenderer
+from .user_hints import (
+    CLI_COMMAND_NAME,
+    WORK_TYPE_ARG_HELP,
+    hint_resume_github,
+    hint_resume_task,
+    task_advance_shell,
+    task_archive_shell,
+)
 
 
 # ------------------------------------------------------------------
@@ -185,7 +193,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     """System health check — verify all tools and configuration."""
     config = _load_config(args)
 
-    print("morch doctor\n")
+    print(f"{CLI_COMMAND_NAME} doctor\n")
 
     print("Tools:")
     statuses = check_all()
@@ -216,7 +224,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     if all_ok:
         print("All checks passed.")
     else:
-        print("Some checks failed. Run `morch auth status` for details.")
+        print(f"Some checks failed. Run `{CLI_COMMAND_NAME} auth status` for details.")
 
 
 # ------------------------------------------------------------------
@@ -402,7 +410,7 @@ def cmd_run_prompt(args: argparse.Namespace) -> None:
 
     if result.waiting_on:
         print(f"\nWaiting on: {result.waiting_on}")
-        print(f"Resume: morch resume task {result.task_name}")
+        print(hint_resume_task(result.task_name))
     elif result.is_complete:
         print("\nAll agents completed successfully.")
     else:
@@ -616,7 +624,7 @@ def cmd_watch_task(args: argparse.Namespace) -> None:
                 next_artifact = last.artifact or ""
 
             print("\033[2J\033[H", end="")
-            print(f"=== morch watch: {task_name} ===\n")
+            print(f"=== {CLI_COMMAND_NAME} watch: {task_name} ===\n")
             print(f"  State:        {task.state.value}")
             print(f"  Run status:   {task.run_status.value}")
             print(f"  Cycle:        {task.cycle} / {task.max_cycles}")
@@ -791,7 +799,7 @@ def cmd_prompt_list_templates(args: argparse.Namespace) -> None:
     print("Available prompt templates:\n")
     for name in templates:
         print(f"  {name}")
-    print(f"\nUsage: morch prompt init <name> --output .morch/prompts/my-task.md")
+    print(f"\nUsage: {CLI_COMMAND_NAME} prompt init <name> --output .morch/prompts/my-task.md")
 
 
 def cmd_prompt_init(args: argparse.Namespace) -> None:
@@ -810,7 +818,10 @@ def cmd_prompt_init(args: argparse.Namespace) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, output)
     print(f"Template '{template_name}' copied to: {output}")
-    print(f"Edit the file, then use it with: morch run github <issue> --prompt-file {output}")
+    print(
+        f"Edit the file, then use it with: "
+        f"{CLI_COMMAND_NAME} run github <issue> --prompt-file {output}"
+    )
 
 
 # ------------------------------------------------------------------
@@ -829,7 +840,7 @@ def cmd_task_init(args: argparse.Namespace) -> None:
     print(f"Task created: {task.name}")
     print(f"State:        {task.state.value}")
     print(f"Workspace:    {config.workspace_dir}/active/{task.name}/")
-    print(f"Next:         Edit 00-scope.md, then run: morch task advance {task.name}")
+    print(f"Next:         Edit 00-scope.md, then run: {task_advance_shell(task.name)}")
 
 
 def cmd_task_advance(args: argparse.Namespace) -> None:
@@ -846,7 +857,7 @@ def cmd_task_advance(args: argparse.Namespace) -> None:
 
     if task.is_terminal:
         if task.state.value == "approved":
-            print(f"\nTask approved! Run: morch task archive {task.name}")
+            print(f"\nTask approved! Run: {task_archive_shell(task.name)}")
         elif task.state.value == "escalated":
             print(f"\nTask escalated — human intervention required.")
         elif task.state.value == "archived":
@@ -928,10 +939,10 @@ def _print_run_result(result) -> None:
 
     if result.is_waiting:
         print(f"\nWaiting on: {result.waiting_on.value if result.waiting_on else 'unknown'}")
-        print(f"Resume: morch resume task {result.task_name}")
+        print(hint_resume_task(result.task_name))
     elif result.is_complete:
         if result.final_state.value == "approved":
-            print(f"\nTask approved! Run: morch task archive {result.task_name}")
+            print(f"\nTask approved! Run: {task_archive_shell(result.task_name)}")
         elif result.final_state.value == "escalated":
             print(f"\nTask escalated — human intervention required.")
     elif result.run_status == RunStatus.SUSPENDED:
@@ -956,7 +967,7 @@ def _print_github_run_result(result: GitHubRunResult) -> None:
 
     if result.is_waiting:
         print(f"\nWaiting on: {result.waiting_on.value if result.waiting_on else 'unknown'}")
-        print(f"Run: morch resume github {result.task_name}")
+        print(hint_resume_github(result.task_name))
     elif result.is_complete:
         if result.final_state.value == "approved":
             print(f"\nPR approved! Merge when ready.")
@@ -975,8 +986,11 @@ def _print_github_run_result(result: GitHubRunResult) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="morch",
-        description="morch — multi-agent orchestrator for Cursor, Claude, and Codex workflows.",
+        prog=CLI_COMMAND_NAME,
+        description=(
+            f"{CLI_COMMAND_NAME} — multi-agent orchestrator for "
+            "Cursor, Claude, and Codex workflows."
+        ),
     )
     parser.add_argument("--config", "-c", help="Path to config file", default=None)
     parser.add_argument("--workspace", "-w", help="Override workspace directory", default=None)
@@ -1045,10 +1059,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run_gh = run_sub.add_parser("github", help="GitHub-native issue pipeline")
     p_run_gh.add_argument("issue_number", type=int, help="GitHub issue number")
     p_run_gh.add_argument("--repo", "-r", default="", help="GitHub repository (owner/name)")
-    p_run_gh.add_argument(
-        "--type", default="feat",
-        help="Work type: feat, modify, fix, refactor, docs, chore, ops, test, hotfix",
-    )
+    p_run_gh.add_argument("--type", default="feat", help=WORK_TYPE_ARG_HELP)
     p_run_gh.add_argument(
         "--prompt-file", default=None,
         help="Path to a detailed prompt file for agent instructions",
@@ -1087,10 +1098,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_issue_start.add_argument("--title", required=True, help="Issue title")
     p_issue_start.add_argument("--body", "-b", default="", help="Issue body")
     p_issue_start.add_argument("--prompt-file", default=None, help="Prompt file for detailed instructions")
-    p_issue_start.add_argument(
-        "--type", default="feat",
-        help="Work type: feat, modify, fix, refactor, docs, chore, ops, test, hotfix",
-    )
+    p_issue_start.add_argument("--type", default="feat", help=WORK_TYPE_ARG_HELP)
     p_issue_start.set_defaults(func=cmd_issue_start)
 
     # ---- prompt ----
@@ -1218,7 +1226,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ghrun_compat = sub.add_parser("github-run", help=argparse.SUPPRESS)
     p_ghrun_compat.add_argument("issue_number", type=int)
     p_ghrun_compat.add_argument("--repo", "-r", default="")
-    p_ghrun_compat.add_argument("--type", default="feat")
+    p_ghrun_compat.add_argument("--type", default="feat", help=WORK_TYPE_ARG_HELP)
     p_ghrun_compat.add_argument("--prompt-file", default=None)
     p_ghrun_compat.set_defaults(func=cmd_run_github)
 

@@ -16,6 +16,7 @@ For each step:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -28,10 +29,14 @@ from ..domain.models import (
     RunStatus,
     _now_iso,
 )
+from ..domain import provenance
 from ..infrastructure.file_state_store import FileStateStore
-from ..infrastructure.github_service import GitHubService
+from ..infrastructure.github_service import GitHubError, GitHubService
 from ..infrastructure.run_logger import RunLogger
+from ..user_hints import hint_resume_github
 from .github_task_service import GitHubTaskService
+
+_MAX_SAME_STEP_REPEATS = 2
 
 
 @dataclass
@@ -215,9 +220,19 @@ class GitHubRunOrchestrator:
     ) -> GitHubRunResult:
         steps: list[GitHubStepRecord] = []
         max_iterations = 20
+        prev_step_key: Optional[str] = None
+        same_step_count = 0
 
-        for _ in range(max_iterations):
+        for iteration in range(max_iterations):
             task = self.task_service.get_task(task.name)
+
+            if logger:
+                logger.log(
+                    "loop_iteration",
+                    iteration=iteration,
+                    state=task.state.value,
+                    pr_number=task.pr_number,
+                )
 
             if task.is_terminal:
                 self._update_run_status(task, RunStatus.COMPLETED)
@@ -226,6 +241,11 @@ class GitHubRunOrchestrator:
                         "github_run_complete",
                         final_state=task.state.value,
                         steps=len(steps),
+                    )
+                if task.state == GitHubTaskState.APPROVED and task.pr_number:
+                    self._post_provenance(
+                        task,
+                        provenance.comment_approved(task.pr_number, task.cycle),
                     )
                 return GitHubRunResult(
                     task_name=task.name,
@@ -239,6 +259,8 @@ class GitHubRunOrchestrator:
 
             advanced = self._try_advance_from_github(task, steps, on_step)
             if advanced:
+                prev_step_key = None
+                same_step_count = 0
                 continue
 
             next_step = resolve_github_next_step(task)
@@ -250,6 +272,35 @@ class GitHubRunOrchestrator:
                     run_status=RunStatus.COMPLETED,
                     steps=steps,
                     message="No further steps available.",
+                    pr_number=task.pr_number,
+                    pr_url=task.pr_url,
+                )
+
+            step_key = f"{task.state.value}:{next_step.action}"
+            if step_key == prev_step_key:
+                same_step_count += 1
+            else:
+                prev_step_key = step_key
+                same_step_count = 1
+
+            if same_step_count > _MAX_SAME_STEP_REPEATS:
+                if logger:
+                    logger.log(
+                        "same_step_exceeded",
+                        step_key=step_key,
+                        count=same_step_count,
+                    )
+                self._update_run_status(task, RunStatus.SUSPENDED)
+                return GitHubRunResult(
+                    task_name=task.name,
+                    final_state=task.state,
+                    run_status=RunStatus.SUSPENDED,
+                    steps=steps,
+                    message=(
+                        f"Step '{next_step.action}' repeated {same_step_count} times "
+                        f"without state change (state: {task.state.value}). "
+                        f"Suspended to prevent infinite loop."
+                    ),
                     pr_number=task.pr_number,
                     pr_url=task.pr_url,
                 )
@@ -272,14 +323,26 @@ class GitHubRunOrchestrator:
                     "github_step_start",
                     agent=next_step.agent.value,
                     action=next_step.action,
+                    state=task.state.value,
                     adapter=adapter.name,
                     capability=adapter.capability.value,
+                    same_step_count=same_step_count,
                 )
 
             if on_step:
                 on_step(
                     f"[{next_step.agent.value}] Invoking {adapter.name} adapter "
                     f"for {next_step.action}..."
+                )
+
+            if next_step.action in ("review_pr", "final_review"):
+                self._post_provenance(
+                    task,
+                    provenance.comment_review_started(
+                        next_step.agent,
+                        task.pr_number or 0,
+                        task.cycle,
+                    ),
                 )
 
             context = self._build_context(task)
@@ -314,7 +377,31 @@ class GitHubRunOrchestrator:
                         f"[{next_step.agent.value}] Completed: {next_step.action}"
                     )
 
-                self._post_step_advance(task, next_step)
+                if next_step.action in ("review_pr", "final_review"):
+                    review_outcome = getattr(result, "review_outcome", None)
+                    status_str = review_outcome.value if review_outcome else ""
+                    has_formal = self._check_formal_review_posted(task, next_step.agent)
+                    if has_formal:
+                        self._post_provenance(
+                            task,
+                            provenance.comment_review_completed(
+                                next_step.agent,
+                                task.pr_number or 0,
+                                task.cycle,
+                                status=status_str,
+                            ),
+                        )
+                    else:
+                        self._post_provenance(
+                            task,
+                            provenance.comment_fallback_review(
+                                next_step.agent,
+                                task.pr_number or 0,
+                                task.cycle,
+                            ),
+                        )
+
+                self._post_step_advance(task, next_step, logger=logger)
                 continue
 
             if result.status == ExecutionStatus.WAITING:
@@ -329,7 +416,7 @@ class GitHubRunOrchestrator:
                 if on_step:
                     on_step(
                         f"[{next_step.agent.value}] Waiting for manual completion. "
-                        f"Run: orchestrator github-resume {task.name}"
+                        f"{hint_resume_github(task.name)}"
                     )
                 return GitHubRunResult(
                     task_name=task.name,
@@ -400,6 +487,10 @@ class GitHubRunOrchestrator:
                     status=ExecutionStatus.COMPLETED,
                     message=f"PR #{pr_number} detected.",
                 ))
+                self._post_provenance(
+                    task,
+                    provenance.comment_pr_opened(AgentRole.CURSOR, pr_number, task.cycle),
+                )
                 self.task_service.advance(task.name)
                 return True
 
@@ -409,14 +500,15 @@ class GitHubRunOrchestrator:
         ):
             review_state = self.task_service.detect_review_state(task.name)
             if review_state:
+                agent = (
+                    AgentRole.CLAUDE
+                    if state == GitHubTaskState.CLAUDE_REVIEWING
+                    else AgentRole.CODEX
+                )
                 if on_step:
                     on_step(f"Review state detected: {review_state}")
                 steps.append(GitHubStepRecord(
-                    agent=(
-                        AgentRole.CLAUDE
-                        if state == GitHubTaskState.CLAUDE_REVIEWING
-                        else AgentRole.CODEX
-                    ),
+                    agent=agent,
                     action="review_detected",
                     status=ExecutionStatus.COMPLETED,
                     message=f"Review state: {review_state}",
@@ -430,17 +522,21 @@ class GitHubRunOrchestrator:
         self,
         task: GitHubTask,
         step: GitHubNextStep,
+        logger: Optional[RunLogger] = None,
     ) -> None:
         """Advance the task after an adapter step completed."""
-        if step.action == "implement":
-            pr_number = self.task_service.detect_pr(task.name)
+        if step.action in ("implement", "open_pr"):
+            pr_number = self._detect_pr_with_retry(task.name, logger=logger)
             if pr_number:
                 self.task_service.advance(task.name)
-            return
-
-        if step.action == "open_pr":
-            pr_number = self.task_service.detect_pr(task.name)
-            if pr_number:
+            else:
+                if logger:
+                    logger.log(
+                        "force_advance_no_pr",
+                        action=step.action,
+                        state=task.state.value,
+                        note="Adapter reported success but PR not detected; force-advancing.",
+                    )
                 self.task_service.advance(task.name)
             return
 
@@ -454,6 +550,67 @@ class GitHubRunOrchestrator:
             return
 
         self.task_service.advance(task.name)
+
+    def _detect_pr_with_retry(
+        self,
+        task_name: str,
+        max_attempts: int = 4,
+        delay: float = 3.0,
+        logger: Optional[RunLogger] = None,
+    ) -> Optional[int]:
+        """Poll for PR detection with bounded retries.
+
+        GitHub API may return stale data immediately after PR creation.
+        """
+        for attempt in range(1, max_attempts + 1):
+            pr_number = self.task_service.detect_pr(task_name)
+            if pr_number:
+                if logger:
+                    logger.log(
+                        "pr_detected",
+                        pr_number=pr_number,
+                        attempt=attempt,
+                    )
+                return pr_number
+            if attempt < max_attempts:
+                if logger:
+                    logger.log(
+                        "pr_detect_retry",
+                        attempt=attempt,
+                        delay=delay,
+                    )
+                time.sleep(delay)
+        if logger:
+            logger.log(
+                "pr_detect_exhausted",
+                attempts=max_attempts,
+            )
+        return None
+
+    def _post_provenance(self, task: GitHubTask, body: str) -> None:
+        """Post an issue comment for workflow provenance (best-effort)."""
+        try:
+            self.github.add_issue_comment(task.issue_number, body)
+        except GitHubError:
+            pass
+
+    def _check_formal_review_posted(
+        self,
+        task: GitHubTask,
+        agent: AgentRole,
+    ) -> bool:
+        """Check if the agent posted a formal PR review on GitHub.
+
+        Returns True if at least one non-COMMENTED review exists.
+        Tolerates API failures by returning True (assume posted).
+        """
+        if not task.pr_number:
+            return False
+        try:
+            state = self.github.get_latest_review_state(task.pr_number)
+            return state is not None
+        except GitHubError:
+            return True
 
     def _action_to_artifact(
         self,

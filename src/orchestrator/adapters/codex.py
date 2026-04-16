@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from ..domain.models import AgentRole
+from ..domain.provenance import review_header
 from ..infrastructure.file_state_store import FileStateStore
 from .command import CommandAdapter
 
@@ -133,17 +135,24 @@ class CodexCommandAdapter(CommandAdapter):
         instruction: str,
         context: dict[str, Any],
     ) -> str:
-        repo = context.get("target_repo", "")
+        github_repo = context.get("github_repo", "") or context.get("target_repo", "")
         cycle = context.get("cycle", 1)
         issue_number = context.get("issue_number", "")
         pr_number = context.get("pr_number", "")
         base_branch = context.get("base_branch", "main")
 
+        prov_header = review_header(
+            agent=AgentRole.CODEX,
+            role="final reviewer",
+            pr_number=pr_number,
+            cycle=cycle,
+        )
+
         parts = [
-            "You are **Codex**, the final reviewer and approval gate in a GitHub-native workflow.",
+            "You are **Codex** (`@codex-agent`), the final reviewer and approval gate in a GitHub-native workflow.",
             "",
             f"Task: {task_name}",
-            f"Repository: {repo}",
+            f"Repository: {github_repo}",
             f"Issue: #{issue_number}",
             f"PR: #{pr_number}",
             f"Cycle: {cycle}",
@@ -154,12 +163,21 @@ class CodexCommandAdapter(CommandAdapter):
             "",
             "## Review workflow",
             "",
-            f"1. Read the full PR diff: `gh pr diff {pr_number} --repo {repo}`",
-            f"2. Read all previous review comments: `gh pr view {pr_number} --repo {repo} --comments`",
+            f"1. Read the full PR diff: `gh pr diff {pr_number} --repo {github_repo}`",
+            f"2. Read all previous review comments: `gh pr view {pr_number} --repo {github_repo} --comments`",
             f"3. Run any validation commands if applicable",
-            f"4. Post your final review:",
-            f"   - If approved: `gh pr review {pr_number} --repo {repo} --approve --body 'Final approval. LGTM.'`",
-            f"   - If changes needed: `gh pr review {pr_number} --repo {repo} --request-changes --body '...'`",
+            f"4. Post your final review (MUST include the provenance header below):",
+            f"   - If approved: `gh pr review {pr_number} --repo {github_repo} --approve --body '<review body>'`",
+            f"   - If changes needed: `gh pr review {pr_number} --repo {github_repo} --request-changes --body '<review body>'`",
+            "",
+            "## Review body format",
+            "",
+            "Your review body MUST start with this provenance header:",
+            f"```",
+            prov_header,
+            f"```",
+            "",
+            "Then include your summary, findings, and verdict.",
             "",
             "## Safety rules",
             "",

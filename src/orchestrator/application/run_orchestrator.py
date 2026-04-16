@@ -32,6 +32,7 @@ from ..domain.models import (
 from ..domain.workflow import resolve_next_step
 from ..infrastructure.file_state_store import FileStateStore
 from ..infrastructure.run_logger import RunLogger
+from ..user_hints import hint_resume_task
 from .artifact_service import ArtifactService
 from .task_service import TaskService
 
@@ -320,7 +321,7 @@ class RunOrchestrator:
                 if on_step:
                     on_step(
                         f"[{next_step.agent.value}] Waiting for manual completion. "
-                        f"Run: morch resume task {task_name}"
+                        f"{hint_resume_task(task_name)}"
                     )
 
                 return RunResult(

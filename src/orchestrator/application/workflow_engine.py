@@ -13,6 +13,7 @@ from typing import Optional
 from ..adapters.base import AgentAdapter
 from ..domain.models import AgentRole, Task, TaskState
 from ..domain.workflow import NextStep, resolve_next_step
+from ..user_hints import task_advance_shell
 from .artifact_service import ArtifactService
 from .task_service import TaskService
 
@@ -140,7 +141,7 @@ class WorkflowEngine:
             "",
             "After completing this step:",
             f"  1. Write the artifact file: {step.artifact}",
-            f"  2. Run: orchestrator advance {task.name}",
+            f"  2. Run: {task_advance_shell(task.name)}",
         ]
         return "\n".join(lines)
 

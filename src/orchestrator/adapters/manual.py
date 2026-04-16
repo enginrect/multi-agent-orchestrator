@@ -22,6 +22,7 @@ from ..domain.models import (
 )
 from ..infrastructure.file_state_store import FileStateStore
 from ..infrastructure.template_renderer import TemplateRenderer
+from ..user_hints import resume_task_shell
 from .base import AgentAdapter
 
 
@@ -80,13 +81,13 @@ class ManualAdapter(AgentAdapter):
             f"## What to do\n\n{instruction}\n\n"
             f"## Artifact file\n\n"
             f"Edit `{artifact}` in this directory, then run:\n\n"
-            f"```bash\nmorch resume task {task_name}\n```\n"
+            f"```bash\n{resume_task_shell(task_name)}\n```\n"
         )
         instruction_file.write_text(instruction_content)
 
         msg = (
             f"Manual step required for {artifact}. "
-            f"Edit the file, then run: morch resume task {task_name}"
+            f"Edit the file, then run: {resume_task_shell(task_name)}"
         )
 
         if not isinstance(self._output, io.StringIO):
@@ -96,7 +97,7 @@ class ManualAdapter(AgentAdapter):
                 f"Artifact: {artifact}\n"
                 f"Template: {artifact_path}\n\n"
                 f"{instruction}\n\n"
-                f"After completing, run: morch resume task {task_name}\n"
+                f"After completing, run: {resume_task_shell(task_name)}\n"
                 f"---\n\n"
             )
 

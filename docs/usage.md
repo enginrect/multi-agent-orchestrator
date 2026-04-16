@@ -90,13 +90,13 @@ Example output (manual adapter):
 ```
 [run] Task created: add-metrics (state: cursor_implementing)
 [run] [cursor] Invoking manual adapter for 01-cursor-implementation.md...
-[run] [cursor] Waiting for manual completion. Run: morch resume task add-metrics
+[run] [cursor] Waiting for manual completion. Resume: morch resume task add-metrics
 
 Task:       add-metrics
 State:      cursor_implementing
 Run status: waiting_on_cursor
 Waiting on: cursor
-Run: morch resume task add-metrics
+Resume: morch resume task add-metrics
 ```
 
 ### `morch resume task`

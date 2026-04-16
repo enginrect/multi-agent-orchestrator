@@ -18,6 +18,7 @@ from ..domain.github_models import (
 )
 from ..domain.github_workflow import generate_branch_name, generate_pr_title, resolve_github_next_step
 from ..domain.models import ReviewOutcome
+from ..domain.provenance import comment_issue_claimed
 from ..infrastructure.file_state_store import FileStateStore
 from ..infrastructure.github_service import GitHubService
 
@@ -91,7 +92,7 @@ class GitHubTaskService:
 
         self.github.add_issue_comment(
             issue_number,
-            f"Orchestrator claimed this issue. Branch: `{branch}`",
+            comment_issue_claimed(branch=branch, cycle=1, implementer="Cursor"),
         )
 
         task.record_transition(

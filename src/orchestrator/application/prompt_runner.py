@@ -23,6 +23,7 @@ from ..domain.models import (
 from ..infrastructure.config_loader import AgentsConfig
 from ..infrastructure.file_state_store import FileStateStore
 from ..infrastructure.run_logger import RunLogger
+from ..user_hints import hint_resume_task
 
 
 @dataclass
@@ -204,7 +205,7 @@ class PromptRunner:
                 if on_step:
                     on_step(
                         f"[{agent_name}] Waiting for manual completion. "
-                        f"Resume: morch resume task {task_name}"
+                        f"{hint_resume_task(task_name)}"
                     )
                 task.run_status = RunStatus.SUSPENDED
                 self.store.save_task(task)

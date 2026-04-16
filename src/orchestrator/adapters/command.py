@@ -85,7 +85,7 @@ class _ProgressSpinner:
             except OSError:
                 break
             idx += 1
-            self._stop.wait(0.5)
+            self._stop.wait(0.15)
         try:
             self._output.write("\r" + " " * 80 + "\r")
             self._output.flush()
