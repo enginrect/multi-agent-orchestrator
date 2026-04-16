@@ -142,6 +142,7 @@ class OrchestratorConfig:
                     "[{type}][Issue #{issue}][{agent}] {summary}",
                 ),
                 labels=gh.get("labels", {}),
+                local_repo_path=gh.get("local_repo_path", ""),
             )
 
         return config

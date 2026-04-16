@@ -592,8 +592,10 @@ def cmd_status_github(args: argparse.Namespace) -> None:
         store=store,
         github=github,
         branch_pattern=config.github.branch_pattern,
+        pr_title_pattern=config.github.pr_title_pattern,
         labels=config.github.labels,
         base_branch=config.github.base_branch,
+        max_cycles=config.max_cycles,
     )
 
     task = task_service.get_task(args.task_name)
@@ -932,19 +934,13 @@ def cmd_task_archive(args: argparse.Namespace) -> None:
 
 def cmd_task_list(args: argparse.Namespace) -> None:
     task_svc, _, _ = _build_services(args)
-    config = _load_config(args)
-    store, _ = _resolve_paths(config)
-
     tasks = task_svc.list_tasks(include_archived=args.all)
 
     if tasks["active"]:
         print("Active tasks:")
         for name in tasks["active"]:
-            if _is_github_task(store, name):
-                _print_github_task_line(store, name)
-            else:
-                task = task_svc.get_task(name)
-                print(f"  {name:<30s} [{task.state.value}] cycle {task.cycle}")
+            task = task_svc.get_task(name)
+            print(f"  {name:<30s} [{task.state.value}] cycle {task.cycle}")
     else:
         print("No active tasks.")
 
@@ -952,24 +948,6 @@ def cmd_task_list(args: argparse.Namespace) -> None:
         print("\nArchived tasks:")
         for name in tasks["archived"]:
             print(f"  {name}")
-
-
-def _print_github_task_line(store: "FileStateStore", name: str) -> None:
-    """Print a single GitHub task line for ``task list`` without crashing."""
-    import yaml as _yaml
-
-    state_file = store.task_dir(name) / "state.yaml"
-    if not state_file.is_file():
-        state_file = store.task_dir(name, archived=True) / "state.yaml"
-    try:
-        data = _yaml.safe_load(state_file.read_text())
-        state = data.get("state", "unknown")
-        cycle = data.get("cycle", 1)
-        pr = data.get("pr_number", "")
-        pr_info = f" PR#{pr}" if pr else ""
-        print(f"  {name:<30s} [{state}] cycle {cycle}{pr_info} (github)")
-    except Exception:
-        print(f"  {name:<30s} [?] (github, unreadable state)")
 
 
 # ------------------------------------------------------------------
