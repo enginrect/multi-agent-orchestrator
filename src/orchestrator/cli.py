@@ -841,6 +841,52 @@ def cmd_issue_start(args: argparse.Namespace) -> None:
     _print_github_run_result(run_result)
 
 
+def cmd_issue_attach(args: argparse.Namespace) -> None:
+    """Attach to an existing issue/PR and start the review workflow."""
+    orch, config = _build_github_orchestrator(args)
+
+    work_type_str = getattr(args, "type", "feat") or "feat"
+    try:
+        work_type = WorkType(work_type_str)
+    except ValueError:
+        work_type = WorkType.FEAT
+
+    prompt_content = None
+    prompt_file_path = getattr(args, "prompt_file", None)
+    if prompt_file_path:
+        prompt_content = _read_prompt_file(prompt_file_path)
+
+    pr_number = getattr(args, "pr", None)
+    branch = getattr(args, "branch", None)
+
+    task = orch.task_service.import_existing(
+        issue_number=args.issue_number,
+        work_type=work_type,
+        branch_name=branch,
+        pr_number=pr_number,
+    )
+
+    print(f"Attached to issue #{task.issue_number}: {task.issue_title}")
+    print(f"  State: {task.state.value}")
+    print(f"  PR: #{task.pr_number}" if task.pr_number else "  PR: (none detected)")
+    print(f"  Branch: {task.branch_name}")
+
+    if prompt_content:
+        orch._prompt_content = prompt_content
+        task_dir = orch.store.task_dir(task.name)
+        (task_dir / "prompt.md").write_text(prompt_content)
+
+    def on_step(msg: str) -> None:
+        print(f"[attach] {msg}")
+
+    result = orch.resume(
+        task_name=task.name,
+        on_step=on_step,
+    )
+
+    _print_github_run_result(result)
+
+
 # ------------------------------------------------------------------
 # prompt template management
 # ------------------------------------------------------------------
@@ -1193,6 +1239,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_issue_start.add_argument("--local-repo", default=None, help="Absolute path to local git clone (default: CWD)")
     p_issue_start.add_argument("--timeout", type=int, default=None, help="Override agent timeout in seconds (e.g. 1800)")
     p_issue_start.set_defaults(func=cmd_issue_start)
+
+    p_issue_attach = issue_sub.add_parser(
+        "attach",
+        help="Attach to an existing issue/PR and start review workflow",
+    )
+    p_issue_attach.add_argument("issue_number", type=int, help="Existing GitHub issue number")
+    p_issue_attach.add_argument("--repo", "-r", default="", help="GitHub repository (owner/name)")
+    p_issue_attach.add_argument("--pr", type=int, default=None, help="Existing PR number (auto-detected if omitted)")
+    p_issue_attach.add_argument("--branch", default=None, help="Existing branch name (auto-detected if omitted)")
+    p_issue_attach.add_argument("--type", default="feat", help=WORK_TYPE_ARG_HELP)
+    p_issue_attach.add_argument("--prompt-file", default=None, help="Prompt file for detailed instructions")
+    p_issue_attach.add_argument("--local-repo", default=None, help="Absolute path to local git clone (default: CWD)")
+    p_issue_attach.add_argument("--timeout", type=int, default=None, help="Override agent timeout in seconds (e.g. 1800)")
+    p_issue_attach.set_defaults(func=cmd_issue_attach)
 
     # ---- prompt ----
     p_prompt = sub.add_parser("prompt", help="Prompt template management")

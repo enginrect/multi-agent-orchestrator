@@ -399,12 +399,15 @@ Primary specifications and user guides are **English** (`docs/morch.md`, `docs/a
 | **Single-repo scope per invocation** | One `target_repo` / `--repo` per task | Run separate invocations for multiple repos |
 | **Codex sandbox restrictions** | May be unable to post GitHub reviews directly | Relay mechanism ([§5.4](#54-review-relay-mechanism)); fallback comments |
 | **No parallel agent execution** | No concurrent multi-agent steps within one pipeline | By design for determinism and simpler state; future versions would need explicit concurrency model |
+| **Self-approval limitation** | Cursor, Claude, and Codex share a single `git`/`gh` identity; GitHub treats all reviews as from one account | Orchestrator logs a caveat at approval; the approval is an internal gate, not an independent GitHub review. Branch protection rules requiring distinct human reviewers still apply. |
+| **Local repo branch left on workflow branch** | After a run, the local clone may be on the feature branch instead of `main` | Orchestrator now saves and restores the original branch after run/resume completes |
 
 Additional practical constraints:
 
 - **Max review cycles** (default 2) can escalate to human.
 - **Adapter reliability** depends on external CLI versions and authentication.
 - **File-artifact** and **GitHub** modes require different operational skills (`git`/`gh` fluency for GitHub-native).
+- **Self-approval caveat**: In the current single-identity setup, all three agents (Cursor, Claude, Codex) post reviews via the same GitHub account. GitHub may treat approvals as self-approval and not count them toward branch protection approval requirements. This is an inherent limitation of the shared-identity model and is documented in the orchestrator logs and run output.
 
 ---
 

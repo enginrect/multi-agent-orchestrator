@@ -357,3 +357,108 @@ class GitHubService:
             return bool(result)
         except GitHubError:
             return False
+
+    # ------------------------------------------------------------------
+    # Local repo validation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def validate_local_repo(local_repo_path: str, expected_repo: str) -> None:
+        """Verify that a local git clone matches the expected GitHub repo.
+
+        Compares the ``origin`` remote URL against ``expected_repo``
+        (``owner/repo`` format).  Raises :class:`GitHubError` on mismatch
+        to prevent cross-repo contamination.
+        """
+        import os
+
+        if not os.path.isdir(local_repo_path):
+            raise GitHubError(
+                f"--local-repo path does not exist or is not a directory: "
+                f"{local_repo_path}"
+            )
+
+        git_dir = os.path.join(local_repo_path, ".git")
+        if not os.path.isdir(git_dir):
+            raise GitHubError(
+                f"--local-repo path is not a git repository "
+                f"(no .git directory): {local_repo_path}"
+            )
+
+        try:
+            proc = subprocess.run(
+                ["git", "-C", local_repo_path, "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except FileNotFoundError:
+            raise GitHubError("git CLI not found; cannot validate --local-repo")
+
+        if proc.returncode != 0:
+            raise GitHubError(
+                f"Could not read 'origin' remote from {local_repo_path}: "
+                f"{proc.stderr.strip()}"
+            )
+
+        remote_url = proc.stdout.strip()
+        remote_slug = _extract_repo_slug(remote_url)
+        expected_slug = expected_repo.lower().strip("/")
+
+        if remote_slug != expected_slug:
+            raise GitHubError(
+                f"Local repo mismatch — aborting to prevent cross-repo contamination.\n"
+                f"  --repo:       {expected_repo}\n"
+                f"  --local-repo: {local_repo_path}\n"
+                f"  origin URL:   {remote_url}\n"
+                f"  resolved to:  {remote_slug}\n"
+                f"  expected:     {expected_slug}"
+            )
+
+    @staticmethod
+    def get_current_branch(repo_path: str) -> Optional[str]:
+        """Return the currently checked-out branch in a local repo, or None."""
+        try:
+            proc = subprocess.run(
+                ["git", "-C", repo_path, "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if proc.returncode == 0:
+                branch = proc.stdout.strip()
+                return branch if branch != "HEAD" else None
+            return None
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+
+    @staticmethod
+    def checkout_branch(repo_path: str, branch: str) -> bool:
+        """Attempt to checkout a branch in the local repo. Returns True on success."""
+        try:
+            proc = subprocess.run(
+                ["git", "-C", repo_path, "checkout", branch],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            return proc.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+
+
+def _extract_repo_slug(remote_url: str) -> str:
+    """Normalize a git remote URL to ``owner/repo`` lowercase form.
+
+    Handles SSH (``git@github.com:owner/repo.git``), HTTPS
+    (``https://github.com/owner/repo.git``), and bare ``owner/repo``.
+    """
+    url = remote_url.strip()
+    url = re.sub(r"\.git$", "", url)
+    ssh_match = re.match(r"^git@[^:]+:(.+)$", url)
+    if ssh_match:
+        return ssh_match.group(1).lower().strip("/")
+    https_match = re.match(r"^https?://[^/]+/(.+)$", url)
+    if https_match:
+        return https_match.group(1).lower().strip("/")
+    return url.lower().strip("/")

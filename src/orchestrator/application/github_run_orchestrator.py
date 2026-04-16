@@ -33,8 +33,11 @@ from ..domain import provenance
 from ..infrastructure.file_state_store import FileStateStore
 from ..infrastructure.github_service import GitHubError, GitHubService
 from ..infrastructure.run_logger import RunLogger
+from ..infrastructure.logger import get_logger
 from ..user_hints import hint_resume_github
 from .github_task_service import GitHubTaskService
+
+_log = get_logger(__name__)
 
 _MAX_SAME_STEP_REPEATS = 2
 
@@ -108,6 +111,7 @@ class GitHubRunOrchestrator:
         self._prompt_content: Optional[str] = None
         self.local_repo_path = local_repo_path
         self.timeout_override: Optional[int] = None
+        self._saved_branch: Optional[str] = None
 
     def _get_adapter(self, agent: AgentRole) -> Optional[AgentAdapter]:
         adapter = self.adapters.get(agent)
@@ -148,6 +152,55 @@ class GitHubRunOrchestrator:
     # Public API
     # ------------------------------------------------------------------
 
+    def validate_local_repo(self) -> None:
+        """Pre-flight check: verify --local-repo matches --repo.
+
+        Prevents cross-repo contamination by inspecting the origin
+        remote of the local clone.
+        """
+        if not self.local_repo_path:
+            return
+        GitHubService.validate_local_repo(self.local_repo_path, self.github.repo)
+
+    def _save_local_branch(self) -> None:
+        """Record the current branch of the local repo before agents modify it."""
+        if not self.local_repo_path:
+            return
+        branch = GitHubService.get_current_branch(self.local_repo_path)
+        if branch:
+            self._saved_branch = branch
+            _log.info("Saved local branch before workflow: %s", branch)
+
+    def _restore_local_branch(self, logger: Optional[RunLogger] = None) -> None:
+        """Restore the local repo to the branch it was on before the workflow."""
+        if not self.local_repo_path or not self._saved_branch:
+            return
+
+        current = GitHubService.get_current_branch(self.local_repo_path)
+        if current == self._saved_branch:
+            return
+
+        _log.info(
+            "Restoring local branch: %s -> %s", current, self._saved_branch,
+        )
+        ok = GitHubService.checkout_branch(self.local_repo_path, self._saved_branch)
+        if ok:
+            if logger:
+                logger.log(
+                    "local_branch_restored",
+                    from_branch=current,
+                    to_branch=self._saved_branch,
+                )
+        else:
+            msg = (
+                f"Could not restore local branch to '{self._saved_branch}' "
+                f"(currently on '{current}'). "
+                f"Please run: git -C {self.local_repo_path} checkout {self._saved_branch}"
+            )
+            _log.warning(msg)
+            if logger:
+                logger.log("local_branch_restore_failed", message=msg)
+
     def run(
         self,
         issue_number: int,
@@ -161,6 +214,9 @@ class GitHubRunOrchestrator:
             prompt_content: If provided, injected as detailed task instructions
                 into the adapter context (from a ``--prompt-file``).
         """
+        self.validate_local_repo()
+        self._save_local_branch()
+
         self._prompt_content = prompt_content
         task = self.task_service.claim_issue(issue_number, work_type=work_type)
 
@@ -185,7 +241,9 @@ class GitHubRunOrchestrator:
                 f"Branch: {task.branch_name}"
             )
 
-        return self._execute_loop(task, on_step, logger)
+        result = self._execute_loop(task, on_step, logger)
+        self._restore_local_branch(logger)
+        return result
 
     def resume(
         self,
@@ -193,6 +251,9 @@ class GitHubRunOrchestrator:
         on_step: Optional[Callable[[str], None]] = None,
     ) -> GitHubRunResult:
         """Continue a task that was paused waiting for manual completion."""
+        self.validate_local_repo()
+        self._save_local_branch()
+
         task = self.task_service.get_task(task_name)
 
         if task.is_terminal:
@@ -213,7 +274,9 @@ class GitHubRunOrchestrator:
         if on_step:
             on_step(f"Resuming task: {task_name} (state: {task.state.value})")
 
-        return self._execute_loop(task, on_step, logger)
+        result = self._execute_loop(task, on_step, logger)
+        self._restore_local_branch(logger)
+        return result
 
     # ------------------------------------------------------------------
     # Execution loop
@@ -273,6 +336,8 @@ class GitHubRunOrchestrator:
             next_step = resolve_github_next_step(task)
             if next_step is None:
                 self._update_run_status(task, RunStatus.COMPLETED)
+                if task.state == GitHubTaskState.APPROVED:
+                    self._log_self_approval_caveat(task, logger)
                 return GitHubRunResult(
                     task_name=task.name,
                     final_state=task.state,
@@ -708,6 +773,32 @@ class GitHubRunOrchestrator:
                     return candidate[:3000]
 
         return None
+
+    def _log_self_approval_caveat(
+        self,
+        task: GitHubTask,
+        logger: Optional[RunLogger] = None,
+    ) -> None:
+        """Log a caveat that orchestrator approvals share a single git identity.
+
+        GitHub treats all agent reviews as from the same account, so the
+        approval is an orchestrator-internal gate, not an independent
+        GitHub review approval.
+        """
+        msg = (
+            "Self-approval caveat: Cursor, Claude, and Codex share a single "
+            "git/gh identity. GitHub treats all reviews as from one account. "
+            "This approval is an orchestrator-internal gate and does not "
+            "count as an independent GitHub review approval. "
+            "A human reviewer may still be required by branch protection rules."
+        )
+        _log.info(msg)
+        if logger:
+            logger.log(
+                "self_approval_caveat",
+                pr_number=task.pr_number,
+                message=msg,
+            )
 
     def _action_to_artifact(
         self,

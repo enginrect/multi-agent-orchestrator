@@ -104,6 +104,91 @@ class GitHubTaskService:
         return task
 
     # ------------------------------------------------------------------
+    # Attach to existing
+    # ------------------------------------------------------------------
+
+    def import_existing(
+        self,
+        issue_number: int,
+        work_type: WorkType = WorkType.FEAT,
+        branch_name: Optional[str] = None,
+        pr_number: Optional[int] = None,
+    ) -> GitHubTask:
+        """Import an existing GitHub issue/PR into orchestrator tracking.
+
+        Unlike ``claim_issue``, this does not assume morch created the
+        artifacts.  It detects the current state from GitHub and creates
+        a local task at the appropriate workflow position.
+        """
+        issue = self.github.get_issue(issue_number)
+        task_name = f"issue-{issue_number}"
+
+        detected_pr = pr_number
+        detected_branch = branch_name or ""
+        pr_url = ""
+
+        if not detected_pr:
+            prs = self.github.list_prs(state="open")
+            for pr in prs:
+                head = pr.get("headRefName", "")
+                if str(issue_number) in head:
+                    detected_pr = pr["number"]
+                    detected_branch = head
+                    pr_url = pr.get("url", "")
+                    break
+
+        if detected_pr and not detected_branch:
+            try:
+                pr_data = self.github.get_pr(detected_pr)
+                detected_branch = pr_data.get("headRefName", "")
+                pr_url = pr_data.get("url", "")
+            except Exception:
+                pass
+
+        if not detected_branch:
+            detected_branch = generate_branch_name(
+                issue_number,
+                work_type=work_type.value,
+                agent="cursor",
+                cycle=1,
+                pattern=self.branch_pattern,
+            )
+
+        if detected_pr:
+            initial_state = GitHubTaskState.CLAUDE_REVIEWING
+        else:
+            initial_state = GitHubTaskState.CURSOR_IMPLEMENTING
+
+        task = GitHubTask(
+            name=task_name,
+            repo=self.github.repo,
+            issue_number=issue_number,
+            issue_title=issue.get("title", ""),
+            work_type=work_type,
+            description=issue.get("body", "") or "",
+            state=initial_state,
+            branch_name=detected_branch,
+            pr_number=detected_pr,
+            pr_url=pr_url,
+            max_cycles=self.max_cycles,
+        )
+
+        self.store.ensure_workspace()
+        self.store.create_task_dir(task_name)
+        self._save_github_task(task)
+
+        self.github.add_issue_comment(
+            issue_number,
+            f"🤖 **morch** attached to this issue for orchestrated review.\n\n"
+            f"- Detected PR: {'#' + str(detected_pr) if detected_pr else 'none'}\n"
+            f"- Branch: `{detected_branch}`\n"
+            f"- Starting state: `{initial_state.value}`\n"
+            f"- Mode: review-first (human-created artifacts)",
+        )
+
+        return task
+
+    # ------------------------------------------------------------------
     # Read
     # ------------------------------------------------------------------
 
