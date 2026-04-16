@@ -4,38 +4,6 @@ All notable changes to this project will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/).
 
-## [0.1.1] — 2026-04-16
-
-Patch release fixing a reliability bug where agent steps could time out
-prematurely on large-scope workflows.
-
-### Fixed
-
-- **Configurable agent timeout** — agent execution timeout is now
-  configurable per adapter via config YAML and overridable per run
-  via `--timeout` CLI flag
-- **Raised default timeouts** — Cursor 600s→1200s, Codex 600s→900s,
-  Claude 300s→600s to accommodate real-world workloads
-- **Informative timeout errors** — timeout failures now identify the
-  agent, action/phase, and configured timeout value, with guidance
-  on how to increase it
-- **Spinner shows timeout** — the progress spinner displays elapsed
-  time against the configured limit (e.g. `120s/1200s`)
-
-### Usage
-
-```bash
-# Override timeout for a single run (all agents)
-morch issue start --repo o/r --title "..." --timeout 1800
-
-# Or set per-adapter in config YAML
-adapters:
-  cursor:
-    type: cursor-cli
-    settings:
-      timeout: 3600
-```
-
 ## [0.2.0] — 2026-04-16
 
 Feature release focused on self-sufficiency, observability, and documentation.
@@ -83,6 +51,17 @@ primary workflow engine (self-hosted development).
   - Covers installation, setup, auth, configuration, workflows,
     troubleshooting, and examples
 
+- **GitHub Actions CI workflow** — automated test and lint pipeline:
+  - Runs `pytest` on Python 3.11, 3.12, 3.13
+  - Validates package installation
+  - Triggers on push and pull request
+
+- **GitHub Actions release workflow** — automated release pipeline:
+  - Triggers on version tags (`v*`)
+  - Builds sdist and wheel
+  - Creates GitHub Release with changelog body
+  - Publishes to PyPI (when configured)
+
 ### Improvements
 
 - CLI now logs all commands and errors to persistent log file
@@ -106,6 +85,38 @@ primary workflow engine (self-hosted development).
 - **Single-repo scope** — each `morch` invocation targets one repository
 - **No parallel agent execution** — agents run sequentially within
   a workflow cycle
+
+## [0.1.1] — 2026-04-16
+
+Patch release fixing a reliability bug where agent steps could time out
+prematurely on large-scope workflows.
+
+### Fixed
+
+- **Configurable agent timeout** — agent execution timeout is now
+  configurable per adapter via config YAML and overridable per run
+  via `--timeout` CLI flag
+- **Raised default timeouts** — Cursor 600s→1200s, Codex 600s→900s,
+  Claude 300s→600s to accommodate real-world workloads
+- **Informative timeout errors** — timeout failures now identify the
+  agent, action/phase, and configured timeout value, with guidance
+  on how to increase it
+- **Spinner shows timeout** — the progress spinner displays elapsed
+  time against the configured limit (e.g. `120s/1200s`)
+
+### Usage
+
+```bash
+# Override timeout for a single run (all agents)
+morch issue start --repo o/r --title "..." --timeout 1800
+
+# Or set per-adapter in config YAML
+adapters:
+  cursor:
+    type: cursor-cli
+    settings:
+      timeout: 3600
+```
 
 ## [0.1.0] — 2026-04-16
 

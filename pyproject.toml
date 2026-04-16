@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multi-agent-orchestrator"
-version = "0.1.1"
+version = "0.2.0"
 description = "morch — multi-agent orchestrator for Cursor, Claude, and Codex review workflows"
 readme = "README.md"
 license = {text = "Apache-2.0"}
