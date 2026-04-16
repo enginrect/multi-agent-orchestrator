@@ -42,7 +42,9 @@ single-command execution.
 │    run · resume · init · advance · status    │
 ├─────────────────────────────────────────────┤
 │              Application                     │
-│  RunOrchestrator · TaskService · ArtifactSvc │
+│  RunOrchestrator · GitHubRunOrchestrator     │
+│  TaskService · GitHubTaskService             │
+│  ArtifactSvc · PromptRunner                  │
 ├─────────────────────────────────────────────┤
 │               Domain                         │
 │  Task · TaskState · RunStatus · StateMachine │
@@ -254,7 +256,8 @@ workspace/active/<task-name>/
 ├── 03-cursor-response-cycle-1.md   # Cursor rework (if needed)
 ├── 04-codex-review-cycle-1.md      # Codex final review
 ├── 05-final-approval.md            # Sign-off (if approved)
-└── .instruction-*.md               # Manual adapter instruction files
+├── .prompt-<artifact>.md            # Prompt sent to agent (command adapters)
+└── .log-<artifact>.txt             # Agent stdout/stderr (command adapters)
 ```
 
 ## Key design decisions

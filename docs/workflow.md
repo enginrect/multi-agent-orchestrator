@@ -43,11 +43,11 @@ is escalated to a human.
 
 ### Step 1 — Cursor implements
 
-1. `orchestrator init <task-name> --target-repo <path>`
+1. `morch task init <task-name> --target-repo <path>`
 2. Edit `00-scope.md` — objective, acceptance criteria, file scope, risks
 3. Implement changes in the target repository
 4. Write `01-cursor-implementation.md` — what was done, files changed, validation
-5. `orchestrator advance <task-name>`
+5. `morch task advance <task-name>`
 
 ### Step 2 — Claude reviews
 
@@ -57,14 +57,14 @@ is escalated to a human.
    - Set `**Status**: approved`, `minor-fixes-applied`, or `changes-requested`
    - Minor issues: fix directly, note in "Fixes applied"
    - Major issues: describe exact fix in findings
-4. `orchestrator advance <task-name>`
+4. `morch task advance <task-name>`
 
 ### Step 3 — Cursor reworks (if changes requested)
 
 1. Read Claude's findings
 2. Address each finding
 3. Write `03-cursor-response-cycle-1.md`
-4. `orchestrator advance <task-name>`
+4. `morch task advance <task-name>`
 
 ### Step 4 — Codex final review
 
@@ -72,8 +72,8 @@ is escalated to a human.
 2. Run validation commands
 3. Write `04-codex-review-cycle-1.md`
 4. If approved: `05-final-approval.md` is generated
-5. `orchestrator advance <task-name>`
-6. If approved: `orchestrator archive <task-name>`
+5. `morch task advance <task-name>`
+6. If approved: `morch task archive <task-name>`
 
 ### Cycle 2 (if needed)
 
