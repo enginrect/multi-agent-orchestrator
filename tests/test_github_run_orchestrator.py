@@ -308,3 +308,47 @@ class TestGitHubRunWaiting:
 
         assert result.is_waiting
         assert result.waiting_on == AgentRole.CURSOR
+
+
+# ======================================================================
+# Artifact naming
+# ======================================================================
+
+
+class TestActionToArtifact:
+    def test_artifact_names_have_md_extension(self, store, mock_github, task_service):
+        orch = GitHubRunOrchestrator(
+            task_service=task_service,
+            github=mock_github,
+            store=store,
+        )
+        from orchestrator.domain.github_models import GitHubTask, GitHubTaskState
+        from orchestrator.domain.github_workflow import GitHubNextStep
+
+        task = GitHubTask(name="issue-1", repo="owner/repo", issue_number=1)
+        task.cycle = 1
+
+        for action in ("implement", "open_pr", "review_pr", "final_review", "rework"):
+            step = GitHubNextStep(
+                agent=AgentRole.CURSOR, action=action,
+                instruction="", state_after=GitHubTaskState.CURSOR_IMPLEMENTING,
+            )
+            artifact = orch._action_to_artifact(step, task)
+            assert artifact.endswith(".md"), f"artifact for '{action}' lacks .md: {artifact}"
+
+    def test_unknown_action_has_md_extension(self, store, mock_github, task_service):
+        orch = GitHubRunOrchestrator(
+            task_service=task_service,
+            github=mock_github,
+            store=store,
+        )
+        from orchestrator.domain.github_models import GitHubTask, GitHubTaskState
+        from orchestrator.domain.github_workflow import GitHubNextStep
+
+        task = GitHubTask(name="issue-1", repo="owner/repo", issue_number=1)
+        step = GitHubNextStep(
+            agent=AgentRole.CURSOR, action="custom_action",
+            instruction="", state_after=GitHubTaskState.CURSOR_IMPLEMENTING,
+        )
+        artifact = orch._action_to_artifact(step, task)
+        assert artifact.endswith(".md")

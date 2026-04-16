@@ -7,9 +7,11 @@ provides a human-readable instruction when auth is missing.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 
@@ -172,8 +174,32 @@ def check_claude() -> AuthStatus:
     )
 
 
+def _codex_has_login_auth() -> bool:
+    """Return True if ``~/.codex/auth.json`` contains a valid login session."""
+    auth_file = Path.home() / ".codex" / "auth.json"
+    if not auth_file.is_file():
+        return False
+    try:
+        data = json.loads(auth_file.read_text())
+    except (json.JSONDecodeError, OSError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    tokens = data.get("tokens")
+    if isinstance(tokens, dict) and tokens.get("access_token"):
+        return True
+    if data.get("OPENAI_API_KEY"):
+        return True
+    return False
+
+
 def check_codex() -> AuthStatus:
-    """Check Codex CLI availability and auth (requires OPENAI_API_KEY)."""
+    """Check Codex CLI availability and auth.
+
+    Supports two auth modes:
+      1. Login-based: ``~/.codex/auth.json`` with valid tokens
+      2. API-key-based: ``OPENAI_API_KEY`` environment variable
+    """
     import os
 
     path = _find_binary("codex")
@@ -188,14 +214,26 @@ def check_codex() -> AuthStatus:
     rc, version, _ = _run_quiet(["codex", "--version"])
 
     has_key = bool(os.environ.get("OPENAI_API_KEY"))
+    has_login = _codex_has_login_auth()
+
+    authed = has_key or has_login
+    if has_login and has_key:
+        message = "authenticated (login + API key)"
+    elif has_login:
+        message = "authenticated (login session)"
+    elif has_key:
+        message = "authenticated (API key)"
+    else:
+        message = "not authenticated"
+
     return AuthStatus(
         tool="codex",
         installed=True,
-        authenticated=has_key,
+        authenticated=authed,
         version=version if rc == 0 else "",
         path=path,
-        message="OPENAI_API_KEY set" if has_key else "OPENAI_API_KEY not set",
-        login_hint="export OPENAI_API_KEY=sk-...",
+        message=message,
+        login_hint="" if authed else "codex login  OR  export OPENAI_API_KEY=sk-...",
     )
 
 

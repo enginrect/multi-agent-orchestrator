@@ -18,6 +18,7 @@ from orchestrator.infrastructure.github_service import (
     GitHubService,
     IssueNotFoundError,
     PRNotFoundError,
+    _parse_issue_number_from_url,
 )
 
 
@@ -69,19 +70,51 @@ class TestGetIssue:
                 svc.get_issue(9999)
 
 
+class TestParseIssueNumberFromUrl:
+    def test_standard_url(self):
+        assert _parse_issue_number_from_url(
+            "https://github.com/owner/repo/issues/42"
+        ) == 42
+
+    def test_url_with_trailing_newline(self):
+        assert _parse_issue_number_from_url(
+            "https://github.com/owner/repo/issues/7\n"
+        ) == 7
+
+    def test_url_with_trailing_slash(self):
+        assert _parse_issue_number_from_url(
+            "https://github.com/owner/repo/issues/99/"
+        ) == 99
+
+    def test_no_number(self):
+        assert _parse_issue_number_from_url("not a url at all") is None
+
+    def test_fallback_digit_segment(self):
+        assert _parse_issue_number_from_url(
+            "https://github.com/owner/repo/123"
+        ) == 123
+
+
 class TestCreateIssue:
     def test_creates_with_labels(self, svc):
+        issue_data = {"number": 1, "title": "title", "state": "OPEN", "url": "https://github.com/owner/repo/issues/1"}
         with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:
-            mock.return_value = MagicMock(
-                returncode=0,
-                stdout=json.dumps({"number": 1, "url": "https://..."}),
-                stderr="",
-            )
+            mock.side_effect = [
+                MagicMock(returncode=0, stdout="https://github.com/owner/repo/issues/1\n", stderr=""),
+                MagicMock(returncode=0, stdout=json.dumps(issue_data), stderr=""),
+            ]
             result = svc.create_issue("title", "body", labels=["bug", "urgent"])
-        args = mock.call_args[0][0]
-        assert "--label" in args
-        assert "bug" in args
-        assert "urgent" in args
+        create_args = mock.call_args_list[0][0][0]
+        assert "--label" in create_args
+        assert "bug" in create_args
+        assert "urgent" in create_args
+        assert result["number"] == 1
+
+    def test_unparseable_url_raises(self, svc):
+        with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:
+            mock.return_value = MagicMock(returncode=0, stdout="no-url-here", stderr="")
+            with pytest.raises(GitHubError, match="Could not parse issue number"):
+                svc.create_issue("title", "body")
 
 
 class TestAddIssueComment:
@@ -240,6 +273,18 @@ class TestErrorHandling:
             )
             with pytest.raises(GitHubError, match="some error"):
                 svc.add_issue_comment(1, "test")
+
+    def test_non_json_output_gives_diagnostic_error(self, svc):
+        with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:
+            mock.return_value = MagicMock(
+                returncode=0,
+                stdout="https://github.com/owner/repo/issues/1",
+                stderr="",
+            )
+            with pytest.raises(GitHubError, match="non-JSON output") as exc_info:
+                svc._run_gh(["issue", "create", "--title", "t"], parse_json=True)
+            assert "issue create" in str(exc_info.value)
+            assert "https://github.com" in str(exc_info.value)
 
     def test_repo_args_included(self, svc):
         with patch("orchestrator.infrastructure.github_service.subprocess.run") as mock:

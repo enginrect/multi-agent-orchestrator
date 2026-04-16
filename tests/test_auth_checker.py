@@ -1,9 +1,11 @@
 """Tests for auth_checker — mocked subprocess calls."""
 
+import json
 from unittest.mock import patch, MagicMock
 
 from orchestrator.infrastructure.auth_checker import (
     AuthStatus,
+    _codex_has_login_auth,
     check_git,
     check_github,
     check_cursor,
@@ -101,27 +103,103 @@ class TestCheckClaude:
         assert s.authenticated
 
 
+class TestCodexLoginAuth:
+    def test_auth_json_with_tokens(self, tmp_path):
+        auth = {"tokens": {"access_token": "tok_abc", "refresh_token": "ref_xyz"}}
+        auth_file = tmp_path / ".codex" / "auth.json"
+        auth_file.parent.mkdir()
+        auth_file.write_text(json.dumps(auth))
+        with patch("orchestrator.infrastructure.auth_checker.Path.home", return_value=tmp_path):
+            assert _codex_has_login_auth() is True
+
+    def test_auth_json_with_embedded_key(self, tmp_path):
+        auth = {"OPENAI_API_KEY": "sk-embedded", "tokens": {}}
+        auth_file = tmp_path / ".codex" / "auth.json"
+        auth_file.parent.mkdir()
+        auth_file.write_text(json.dumps(auth))
+        with patch("orchestrator.infrastructure.auth_checker.Path.home", return_value=tmp_path):
+            assert _codex_has_login_auth() is True
+
+    def test_missing_auth_json(self, tmp_path):
+        with patch("orchestrator.infrastructure.auth_checker.Path.home", return_value=tmp_path):
+            assert _codex_has_login_auth() is False
+
+    def test_empty_tokens(self, tmp_path):
+        auth = {"tokens": {}}
+        auth_file = tmp_path / ".codex" / "auth.json"
+        auth_file.parent.mkdir()
+        auth_file.write_text(json.dumps(auth))
+        with patch("orchestrator.infrastructure.auth_checker.Path.home", return_value=tmp_path):
+            assert _codex_has_login_auth() is False
+
+    def test_malformed_json(self, tmp_path):
+        auth_file = tmp_path / ".codex" / "auth.json"
+        auth_file.parent.mkdir()
+        auth_file.write_text("not json")
+        with patch("orchestrator.infrastructure.auth_checker.Path.home", return_value=tmp_path):
+            assert _codex_has_login_auth() is False
+
+    def test_not_a_dict(self, tmp_path):
+        auth_file = tmp_path / ".codex" / "auth.json"
+        auth_file.parent.mkdir()
+        auth_file.write_text(json.dumps([1, 2, 3]))
+        with patch("orchestrator.infrastructure.auth_checker.Path.home", return_value=tmp_path):
+            assert _codex_has_login_auth() is False
+
+    def test_empty_access_token(self, tmp_path):
+        auth = {"tokens": {"access_token": ""}}
+        auth_file = tmp_path / ".codex" / "auth.json"
+        auth_file.parent.mkdir()
+        auth_file.write_text(json.dumps(auth))
+        with patch("orchestrator.infrastructure.auth_checker.Path.home", return_value=tmp_path):
+            assert _codex_has_login_auth() is False
+
+
 class TestCheckCodex:
     @patch("orchestrator.infrastructure.auth_checker._find_binary", return_value=None)
     def test_not_installed(self, mock_find):
         s = check_codex()
         assert not s.installed
 
-    @patch("os.environ", {"OPENAI_API_KEY": "sk-test"})
-    @patch("orchestrator.infrastructure.auth_checker._run_quiet", return_value=(0, "0.1.0", ""))
-    @patch("orchestrator.infrastructure.auth_checker._find_binary", return_value="/opt/homebrew/bin/codex")
-    def test_installed_with_key(self, mock_find, mock_run):
-        s = check_codex()
-        assert s.installed
-        assert s.authenticated
-
+    @patch("orchestrator.infrastructure.auth_checker._codex_has_login_auth", return_value=True)
     @patch("os.environ", {})
     @patch("orchestrator.infrastructure.auth_checker._run_quiet", return_value=(0, "0.1.0", ""))
     @patch("orchestrator.infrastructure.auth_checker._find_binary", return_value="/opt/homebrew/bin/codex")
-    def test_installed_no_key(self, mock_find, mock_run):
+    def test_login_auth_only(self, mock_find, mock_run, mock_login):
+        s = check_codex()
+        assert s.installed
+        assert s.authenticated
+        assert s.ready
+        assert "login session" in s.message
+
+    @patch("orchestrator.infrastructure.auth_checker._codex_has_login_auth", return_value=False)
+    @patch("os.environ", {"OPENAI_API_KEY": "sk-test"})
+    @patch("orchestrator.infrastructure.auth_checker._run_quiet", return_value=(0, "0.1.0", ""))
+    @patch("orchestrator.infrastructure.auth_checker._find_binary", return_value="/opt/homebrew/bin/codex")
+    def test_api_key_only(self, mock_find, mock_run, mock_login):
+        s = check_codex()
+        assert s.installed
+        assert s.authenticated
+        assert "API key" in s.message
+
+    @patch("orchestrator.infrastructure.auth_checker._codex_has_login_auth", return_value=True)
+    @patch("os.environ", {"OPENAI_API_KEY": "sk-test"})
+    @patch("orchestrator.infrastructure.auth_checker._run_quiet", return_value=(0, "0.1.0", ""))
+    @patch("orchestrator.infrastructure.auth_checker._find_binary", return_value="/opt/homebrew/bin/codex")
+    def test_both_auth_modes(self, mock_find, mock_run, mock_login):
+        s = check_codex()
+        assert s.authenticated
+        assert "login + API key" in s.message
+
+    @patch("orchestrator.infrastructure.auth_checker._codex_has_login_auth", return_value=False)
+    @patch("os.environ", {})
+    @patch("orchestrator.infrastructure.auth_checker._run_quiet", return_value=(0, "0.1.0", ""))
+    @patch("orchestrator.infrastructure.auth_checker._find_binary", return_value="/opt/homebrew/bin/codex")
+    def test_no_auth(self, mock_find, mock_run, mock_login):
         s = check_codex()
         assert s.installed
         assert not s.authenticated
+        assert "codex login" in s.login_hint
 
 
 class TestCheckTool:

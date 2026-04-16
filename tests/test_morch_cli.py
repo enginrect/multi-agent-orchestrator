@@ -1,8 +1,12 @@
 """Tests for the morch CLI parser and command routing."""
 
-import pytest
+import json
+from unittest.mock import MagicMock
 
-from orchestrator.cli import build_parser
+import pytest
+import yaml
+
+from orchestrator.cli import build_parser, _is_github_task
 
 
 class TestParserStructure:
@@ -173,3 +177,36 @@ class TestBackwardCompat:
         parser = build_parser()
         args = parser.parse_args(["github-status", "issue-42"])
         assert args.task_name == "issue-42"
+
+
+class TestIsGitHubTask:
+    def test_github_task_detected(self, tmp_path):
+        task_dir = tmp_path / "active" / "issue-9"
+        task_dir.mkdir(parents=True)
+        state = {"name": "issue-9", "repo": "owner/repo", "issue_number": 9, "state": "issue_claimed"}
+        (task_dir / "state.yaml").write_text(yaml.dump(state))
+
+        store = MagicMock()
+        store.task_dir.side_effect = lambda name, archived=False: (
+            tmp_path / ("archive" if archived else "active") / name
+        )
+        assert _is_github_task(store, "issue-9") is True
+
+    def test_file_task_not_detected(self, tmp_path):
+        task_dir = tmp_path / "active" / "my-task"
+        task_dir.mkdir(parents=True)
+        state = {"name": "my-task", "target_repo": "/some/path", "state": "initialized"}
+        (task_dir / "state.yaml").write_text(yaml.dump(state))
+
+        store = MagicMock()
+        store.task_dir.side_effect = lambda name, archived=False: (
+            tmp_path / ("archive" if archived else "active") / name
+        )
+        assert _is_github_task(store, "my-task") is False
+
+    def test_missing_task(self, tmp_path):
+        store = MagicMock()
+        store.task_dir.side_effect = lambda name, archived=False: (
+            tmp_path / ("archive" if archived else "active") / name
+        )
+        assert _is_github_task(store, "nonexistent") is False

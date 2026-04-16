@@ -623,10 +623,10 @@ class GitHubRunOrchestrator:
     ) -> str:
         """Map a GitHub action to a nominal artifact name for adapter compatibility."""
         action_map = {
-            "implement": f"github-implementation-cycle-{task.cycle}",
-            "open_pr": f"github-pr-cycle-{task.cycle}",
-            "review_pr": f"github-review-cycle-{task.cycle}",
-            "final_review": f"github-final-review-cycle-{task.cycle}",
-            "rework": f"github-rework-cycle-{task.cycle}",
+            "implement": f"github-implementation-cycle-{task.cycle}.md",
+            "open_pr": f"github-pr-cycle-{task.cycle}.md",
+            "review_pr": f"github-review-cycle-{task.cycle}.md",
+            "final_review": f"github-final-review-cycle-{task.cycle}.md",
+            "rework": f"github-rework-cycle-{task.cycle}.md",
         }
-        return action_map.get(step.action, f"github-{step.action}")
+        return action_map.get(step.action, f"github-{step.action}.md")

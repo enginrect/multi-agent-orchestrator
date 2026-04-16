@@ -492,8 +492,33 @@ def cmd_run_github(args: argparse.Namespace) -> None:
 # ------------------------------------------------------------------
 
 
+def _is_github_task(store: "FileStateStore", task_name: str) -> bool:
+    """Peek at state.yaml to detect a GitHub-native task."""
+    state_file = store.task_dir(task_name) / "state.yaml"
+    if not state_file.is_file():
+        state_file = store.task_dir(task_name, archived=True) / "state.yaml"
+    if not state_file.is_file():
+        return False
+    try:
+        import yaml as _yaml
+        data = _yaml.safe_load(state_file.read_text())
+        return isinstance(data, dict) and "issue_number" in data
+    except Exception:
+        return False
+
+
 def cmd_resume(args: argparse.Namespace) -> None:
     """Resume a task that is waiting for manual completion."""
+    config = _load_config(args)
+    store, _ = _resolve_paths(config)
+    if _is_github_task(store, args.task_name):
+        print(
+            f"Error: '{args.task_name}' is a GitHub-native task.\n"
+            f"Use:  {CLI_COMMAND_NAME} resume github {args.task_name}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     run_orch, _ = _build_run_orchestrator(args)
 
     def on_step(msg: str) -> None:

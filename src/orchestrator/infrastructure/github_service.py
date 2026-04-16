@@ -13,6 +13,7 @@ Authentication is handled externally via ``gh auth login``.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from typing import Any, Optional
 
@@ -38,6 +39,22 @@ class PRNotFoundError(GitHubError):
 
 class GitHubAuthError(GitHubError):
     """Raised when ``gh`` is not authenticated."""
+
+
+def _parse_issue_number_from_url(url: str) -> int | None:
+    """Extract the issue number from a GitHub issue URL.
+
+    ``gh issue create`` outputs URLs like:
+      https://github.com/owner/repo/issues/42
+    """
+    match = re.search(r"/issues/(\d+)", url)
+    if match:
+        return int(match.group(1))
+    parts = url.strip().rstrip("/").split("/")
+    for part in reversed(parts):
+        if part.isdigit():
+            return int(part)
+    return None
 
 
 class GitHubService:
@@ -118,7 +135,15 @@ class GitHubService:
         output = proc.stdout.strip()
         if not output:
             return {}
-        return json.loads(output)
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError as exc:
+            raise GitHubError(
+                f"gh returned non-JSON output for: {' '.join(cmd)}\n"
+                f"stdout (first 200 chars): {output[:200]!r}\n"
+                f"stderr: {proc.stderr.strip()[:200]!r}",
+                stderr=proc.stderr.strip(),
+            ) from exc
 
     def _repo_args(self) -> list[str]:
         return ["--repo", self.repo]
@@ -140,10 +165,24 @@ class GitHubService:
         body: str,
         labels: Optional[list[str]] = None,
     ) -> dict[str, Any]:
+        """Create a GitHub issue and return structured data.
+
+        ``gh issue create`` outputs a plain URL, not JSON.  We parse the
+        issue number from the URL, then fetch full issue data via
+        ``get_issue`` for a reliable structured response.
+        """
         cmd = ["issue", "create", *self._repo_args(), "--title", title, "--body", body]
         for label in labels or []:
             cmd.extend(["--label", label])
-        return self._run_gh(cmd)
+        url = self._run_gh(cmd, parse_json=False)
+
+        issue_number = _parse_issue_number_from_url(url)
+        if issue_number is None:
+            raise GitHubError(
+                f"Could not parse issue number from gh output: {url!r}"
+            )
+
+        return self.get_issue(issue_number)
 
     def add_issue_comment(self, number: int, body: str) -> None:
         self._run_gh([
